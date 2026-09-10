@@ -13,12 +13,23 @@
           "api_url": "API URL (used when auto-discover is off, or as fallback)",
           "scan_interval": "Polling interval (seconds)"
         }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate SolArk Cloud",
+        "description": "Enter updated SolArk Cloud credentials.",
+        "data": {
+          "username": "Username (email)",
+          "password": "Password"
+        }
       }
     },
     "error": {
       "cannot_connect": "Unable to connect to SolArk API.",
       "auth_failed": "Authentication failed. Check credentials.",
       "unknown": "Unexpected error occurred."
+    },
+    "abort": {
+      "reauth_successful": "Reauthentication was successful."
     }
   },
   "options": {

@@ -2,18 +2,13 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
-from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.update_coordinator import (
-    DataUpdateCoordinator,
-    UpdateFailed,
-)
 
-from .api import SolArkCloudAPI, SolArkCloudAPIError
+from .api import SolArkCloudAPI
+from .coordinator import SolArkDataUpdateCoordinator
 from .const import (
     DOMAIN,
     CONF_USERNAME,
@@ -115,22 +110,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         session=session,
     )
 
-    async def async_update_data() -> dict[str, Any]:
-        """Fetch and parse data from SolArk."""
-        try:
-            raw = await api.get_plant_data()
-            parsed = api.parse_plant_data(raw)
-            return parsed
-        except SolArkCloudAPIError as err:
-            raise UpdateFailed(str(err)) from err
-
-    coordinator = DataUpdateCoordinator(
-        hass,
-        _LOGGER,
-        name=f"SolArk {plant_id}",
-        update_method=async_update_data,
-        update_interval=timedelta(seconds=scan_interval),
-    )
+    coordinator = SolArkDataUpdateCoordinator(hass, entry, api)
 
     await coordinator.async_config_entry_first_refresh()
 

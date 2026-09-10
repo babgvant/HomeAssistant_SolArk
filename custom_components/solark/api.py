@@ -5,9 +5,11 @@ import asyncio
 from datetime import datetime, timedelta
 import logging
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
 import aiohttp
+
+from .models import latest_parameter_values
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,6 +31,11 @@ _SECRET_STRING_PATTERNS = (
     re.compile(r'(?i)("token"\s*:\s*")([^"]*)(")'),
     re.compile(r"(?i)(Bearer\s+)\S+"),
 )
+
+
+def _safe_endpoint(endpoint: str) -> str:
+    """Redact path identifiers while retaining a useful route name."""
+    return re.sub(r"/(?:\d+|[A-Za-z0-9-]{8,})(?=/|$)", "/{id}", endpoint)
 
 
 def _redact_secrets(value: Any) -> Any:
@@ -64,6 +71,10 @@ def _redact_secret_text(text: str) -> str:
 class SolArkCloudAPIError(Exception):
     """Exception for Sol-Ark Cloud API errors."""
 
+
+class SolArkCloudAuthenticationError(SolArkCloudAPIError):
+    """Raised when Sol-Ark credentials are rejected."""
+
 class SolArkCloudAPI:
     """Sol-Ark Cloud API client."""
 
@@ -90,8 +101,7 @@ class SolArkCloudAPI:
         self._token_expiry: Optional[datetime] = None
 
         _LOGGER.debug(
-            "SolArkCloudAPI initialized for plant_id=%s, base_url=%s, api_url=%s",
-            self.plant_id,
+            "SolArkCloudAPI initialized with base_url=%s, api_url=%s",
             self.base_url,
             self.api_url,
         )
@@ -128,6 +138,7 @@ class SolArkCloudAPI:
         endpoint: str,
         data: Optional[Dict[str, Any]] = None,
         auth_required: bool = True,
+        retry_auth: bool = True,
     ) -> Dict[str, Any]:
         if auth_required:
             await self._ensure_token()
@@ -142,13 +153,8 @@ class SolArkCloudAPI:
         else:
             json_body = data
 
-        _LOGGER.debug(
-            "Requesting %s %s with params=%s json=%s",
-            method,
-            url,
-            _redact_secrets(params),
-            _redact_secrets(json_body),
-        )
+        safe_endpoint = _safe_endpoint(endpoint)
+        _LOGGER.debug("Requesting %s %s query_keys=%s body_keys=%s", method, safe_endpoint, sorted(params) if params else [], sorted(json_body) if json_body else [])
 
         try:
             async with self._session.request(
@@ -161,38 +167,50 @@ class SolArkCloudAPI:
             ) as resp:
                 text = await resp.text()
                 _LOGGER.debug(
-                    "Response %s %s -> HTTP %s, body: %s",
+                    "Response %s %s -> HTTP %s",
                     method,
-                    url,
+                    safe_endpoint,
                     resp.status,
-                    _redact_secret_text(text[:1000]),
                 )
+                if resp.status == 401 and auth_required and retry_auth:
+                    self._token = None
+                    self._token_expiry = None
+                    return await self._request(
+                        method,
+                        endpoint,
+                        data,
+                        auth_required=auth_required,
+                        retry_auth=False,
+                    )
                 try:
                     resp.raise_for_status()
                 except aiohttp.ClientResponseError as e:
-                    raise SolArkCloudAPIError(
-                        f"HTTP {resp.status} for {endpoint}: "
-                        f"{_redact_secret_text(text[:500])}"
+                    error_type = (
+                        SolArkCloudAuthenticationError
+                        if resp.status in (401, 403)
+                        else SolArkCloudAPIError
+                    )
+                    raise error_type(
+                        f"HTTP {resp.status} for {safe_endpoint}"
                     ) from e
 
                 try:
                     result = await resp.json()
                 except Exception as e:  # noqa: BLE001
                     raise SolArkCloudAPIError(
-                        f"Invalid JSON response from {endpoint}: "
-                        f"{_redact_secret_text(text[:200])}"
+                        f"Invalid JSON response from {safe_endpoint}"
                     ) from e
         except asyncio.TimeoutError as e:  # noqa: BLE001
-            raise SolArkCloudAPIError(f"Timeout for {endpoint}") from e
+            raise SolArkCloudAPIError(f"Timeout for {safe_endpoint}") from e
         except aiohttp.ClientError as e:  # noqa: BLE001
-            raise SolArkCloudAPIError(f"Client error for {endpoint}: {e}") from e
+            raise SolArkCloudAPIError(f"Client error for {safe_endpoint}: {type(e).__name__}") from e
 
         if isinstance(result, dict):
             code = result.get("code")
             if code not in (0, "0", None):
                 msg = result.get("msg", "Unknown error")
                 raise SolArkCloudAPIError(
-                    f"API error for {endpoint}: {msg} (code={code})"
+                    f"API error for {safe_endpoint}: {msg} (code={code})"
                 )
 
         return result
@@ -229,9 +247,8 @@ class SolArkCloudAPI:
             ) as resp:
                 text = await resp.text()
                 _LOGGER.debug(
-                    "OAuth login response HTTP %s, body: %s",
+                    "OAuth login response HTTP %s",
                     resp.status,
-                    _redact_secret_text(text[:1000]),
                 )
                 try:
                     resp.raise_for_status()
@@ -304,9 +321,8 @@ class SolArkCloudAPI:
             ) as resp:
                 text = await resp.text()
                 _LOGGER.debug(
-                    "Legacy login response HTTP %s, body: %s",
+                    "Legacy login response HTTP %s",
                     resp.status,
-                    _redact_secret_text(text[:1000]),
                 )
                 try:
                     resp.raise_for_status()
@@ -364,9 +380,122 @@ class SolArkCloudAPI:
             _LOGGER.debug("Legacy login failed: %s", safe)
             errors.append(f"legacy: {safe}")
 
-        raise SolArkCloudAPIError(
+        raise SolArkCloudAuthenticationError(
             "All login methods failed: " + " | ".join(errors)
         )
+
+    # ------------------------------------------------------------------
+    # structured endpoint API
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _response_data(response: Dict[str, Any]) -> Dict[str, Any]:
+        """Return the data object from a standard API response."""
+        data = response.get("data") if isinstance(response, dict) else None
+        return data if isinstance(data, dict) else {}
+
+    @staticmethod
+    def _response_list(response: Dict[str, Any]) -> list[Dict[str, Any]]:
+        """Return a list from the API's several pagination wrappers."""
+        data = SolArkCloudAPI._response_data(response)
+        candidates: Iterable[Any] = (
+            data.get("infos"),
+            data.get("list"),
+            data.get("records"),
+        )
+        for candidate in candidates:
+            if isinstance(candidate, dict):
+                candidate = candidate.get("list")
+            if isinstance(candidate, list):
+                return [item for item in candidate if isinstance(item, dict)]
+        return []
+
+    async def async_get_plant_metadata(self) -> Dict[str, Any]:
+        """Fetch plant metadata, discarding owner and location fields later."""
+        response = await self._request(
+            "GET", f"/api/v1/plant/{self.plant_id}", {"id": self.plant_id, "lan": "en"}
+        )
+        return self._response_data(response)
+
+    async def async_get_gateways(self) -> list[Dict[str, Any]]:
+        """Fetch all gateways associated with the configured plant."""
+        response = await self._request(
+            "GET",
+            "/api/v1/gateways",
+            {"page": 1, "limit": 100, "plantId": self.plant_id, "status": -1, "lan": "en"},
+        )
+        return self._response_list(response)
+
+    async def async_get_inverters(self) -> list[Dict[str, Any]]:
+        """Fetch all inverters associated with the configured plant."""
+        response = await self._request(
+            "GET",
+            f"/api/v1/plant/{self.plant_id}/inverters",
+            {"page": 1, "limit": 100, "stationId": self.plant_id, "status": -1, "sn": "", "type": -2},
+        )
+        return self._response_list(response)
+
+    async def async_get_batteries(self) -> list[Dict[str, Any]]:
+        """Fetch individually registered batteries for the plant."""
+        response = await self._request(
+            "GET",
+            "/api/v1/batteries",
+            {"pageNumber": 1, "pageSize": 100, "plantId": self.plant_id, "status": -1},
+        )
+        return self._response_list(response)
+
+    async def async_get_plant_flow(self) -> Dict[str, Any]:
+        """Fetch authoritative plant aggregate power flow."""
+        response = await self._request(
+            "GET",
+            f"/api/v1/plant/energy/{self.plant_id}/flow",
+            {"date": datetime.utcnow().strftime("%Y-%m-%d")},
+        )
+        return self._response_data(response)
+
+    async def async_get_plant_realtime(self) -> Dict[str, Any]:
+        """Fetch native plant PV energy counters and current production."""
+        response = await self._request(
+            "GET", f"/api/v1/plant/{self.plant_id}/realtime", {"id": self.plant_id}
+        )
+        return self._response_data(response)
+
+    async def async_get_inverter_flow(self, inverter_id: str | int) -> Dict[str, Any]:
+        """Fetch an individual inverter's power flow."""
+        response = await self._request("GET", f"/api/v1/inverter/{inverter_id}/flow")
+        return self._response_data(response)
+
+    async def async_get_inverter_battery(
+        self, inverter_id: str | int, serial: str
+    ) -> Dict[str, Any]:
+        """Fetch aggregate battery/BMS telemetry associated with an inverter."""
+        response = await self._request(
+            "GET",
+            f"/api/v1/inverter/battery/{inverter_id}/realtime",
+            {"sn": serial, "lan": "en"},
+        )
+        return self._response_data(response)
+
+    async def async_get_inverter_measurements(
+        self,
+        inverter_id: str | int,
+        serial: str,
+        parameter_ids: Iterable[int],
+    ) -> Dict[int, Any]:
+        """Fetch the latest value for requested inverter catalogue parameters."""
+        date = datetime.utcnow().strftime("%Y-%m-%d")
+        response = await self._request(
+            "GET",
+            f"/api/v1/inverter/{inverter_id}/day",
+            {
+                "sn": serial,
+                "date": date,
+                "edate": date,
+                "params": ",".join(str(value) for value in parameter_ids),
+                "lan": "en",
+            },
+        )
+        return latest_parameter_values(self._response_data(response))
 
     # ------------------------------------------------------------------
     # plant data
@@ -375,7 +504,7 @@ class SolArkCloudAPI:
     async def _get_inverter_live_data(self) -> Dict[str, Any]:
         """Fetch live inverter data via dy/store/{sn}/read."""
         await self._ensure_token()
-        _LOGGER.debug("Getting inverter list for plant_id=%s", self.plant_id)
+        _LOGGER.debug("Getting inverter list for configured plant")
 
         inv_params = {
             "page": 1,
@@ -385,13 +514,12 @@ class SolArkCloudAPI:
             "sn": "",
             "type": -2,
         }
-        _LOGGER.debug("Requesting inverter list with params=%s", inv_params)
+        _LOGGER.debug("Requesting inverter list")
         inv_resp = await self._request(
             "GET",
             f"/api/v1/plant/{self.plant_id}/inverters",
             inv_params,
         )
-        _LOGGER.debug("Raw inverter response: %s", inv_resp)
 
         inv_data = inv_resp.get("data") or {}
         inverters = (
@@ -403,31 +531,30 @@ class SolArkCloudAPI:
         _LOGGER.debug("Parsed inverters list length: %s", len(inverters))
 
         if not inverters:
-            _LOGGER.warning("No inverters found for plant %s", self.plant_id)
+            _LOGGER.warning("No inverters found for configured plant")
             return {}
 
         first = inverters[0]
         _LOGGER.debug("First inverter entry: %s", first)
         sn = first.get("sn") or first.get("deviceSn")
         if not sn:
-            _LOGGER.warning("First inverter for plant %s has no SN", self.plant_id)
+            _LOGGER.warning("First inverter for configured plant has no serial")
             return {}
 
-        _LOGGER.debug("Requesting live data for inverter SN=%s", sn)
+        _LOGGER.debug("Requesting live data for first inverter")
         live_resp = await self._request(
             "GET",
             f"/api/v1/dy/store/{sn}/read",
             {"sn": sn},
         )
-        _LOGGER.debug("Raw live response: %s", live_resp)
 
         live_data = live_resp.get("data") or live_resp
         if not isinstance(live_data, dict):
-            _LOGGER.debug("Live data for SN=%s is not a dict: %r", sn, live_data)
+            _LOGGER.debug("Live data for first inverter is not an object")
             return {}
 
         _LOGGER.debug(
-            "Live data keys for SN=%s: %s", sn, list(live_data.keys())
+            "Live data keys: %s", list(live_data.keys())
         )
 
         # Merge energy data from inverter summary into live_data
@@ -452,9 +579,7 @@ class SolArkCloudAPI:
         params = {"date": date_str}
         endpoint = f"/api/v1/plant/energy/{self.plant_id}/flow"
         _LOGGER.debug(
-            "Requesting energy flow for plant %s with params=%s",
-            self.plant_id,
-            params,
+            "Requesting energy flow for configured plant",
         )
         try:
             flow_resp = await self._request(
@@ -466,7 +591,6 @@ class SolArkCloudAPI:
             _LOGGER.warning("Energy flow request failed: %s", e)
             return {}
 
-        _LOGGER.debug("Raw flow response: %s", flow_resp)
         flow_data = flow_resp.get("data") if isinstance(flow_resp, dict) else None
         if isinstance(flow_data, dict):
             return flow_data
@@ -543,15 +667,10 @@ class SolArkCloudAPI:
         return live_data
 
     async def test_connection(self) -> bool:
-        try:
-            await self.login()
-            await self.get_plant_data()
-            return True
-        except SolArkCloudAPIError as e:
-            _LOGGER.error(
-                "SolArk test_connection failed: %s", _redact_secret_text(str(e))
-            )
-            return False
+        """Validate credentials and access to the configured plant."""
+        await self.login()
+        await self.async_get_plant_realtime()
+        return True
 
     # ------------------------------------------------------------------
     # parsing helpers

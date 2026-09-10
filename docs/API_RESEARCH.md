@@ -228,9 +228,9 @@ Daily reset counters use `SensorStateClass.TOTAL`; lifetime counters use
 - `/generation/use` names useful energy fields but the capture does not prove whether
   they are daily, selected-period, or lifetime values; it is not used as a lifetime
   source until that is established.
-- Flow battery magnitude requires direction flags. Battery realtime uses the opposite
-  signed convention in this capture. Normalization must expose positive discharge and
-  negative charge consistently.
+- Flow battery magnitude requires direction flags. Battery realtime already uses a
+  signed value in this capture. Normalization must expose positive discharge and
+  negative charge consistently without applying the flow rule to both endpoints.
 - Inverter status integer meanings and event type/code meanings are not described by
   the API; raw values should be preserved alongside conservative online/offline logic.
 - Some BMS fields use sentinel values (`-100`) or zeros when no BMS is connected.
@@ -256,4 +256,3 @@ Daily reset counters use `SensorStateClass.TOTAL`; lifetime counters use
 9. Expand tests for discovery, hierarchy, parsing, metadata, outages, and recovery.
 10. Rewrite installation, Energy Dashboard, parallel-system, diagnostics, and
     troubleshooting documentation.
-
