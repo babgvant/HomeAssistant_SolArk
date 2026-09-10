@@ -138,7 +138,7 @@ tokens, serial numbers, and account identifiers.
 
 ## Support
 
-Report problems through [GitHub Issues](https://github.com/HammondAutomationHub/HomeAssistant_SolArk/issues).
+Report problems through [GitHub Issues](https://github.com/babgvant/HomeAssistant_SolArk/issues).
 Include the integration version, affected equipment model, Home Assistant logs, and
 downloaded diagnostics. Never attach credentials or an unredacted HAR file.
 
