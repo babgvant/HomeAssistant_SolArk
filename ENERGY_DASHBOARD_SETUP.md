@@ -7,36 +7,37 @@ Dashboard. Do not create Riemann-sum helpers or battery template sensors.
 
 Open **Settings → Dashboards → Energy** and select:
 
-| Energy Dashboard field | Sol-Ark entity |
-|---|---|
-| Solar production | `sensor.solark_energy_total` |
-| Energy consumed from the grid | `sensor.solark_grid_import_energy` |
-| Energy returned to the grid | `sensor.solark_grid_export_energy` |
-| Battery energy going in | `sensor.solark_battery_charge_energy` |
-| Battery energy coming out | `sensor.solark_battery_discharge_energy` |
+| Energy Dashboard section | Field | Sol-Ark entity |
+|---|---|---|
+| Solar panels | Solar production energy | `sensor.solark_energy_total` |
+| Solar panels | Solar production power | `sensor.solark_pv_power` |
+| Electricity grid | Energy consumed from the grid | `sensor.solark_grid_import_energy` |
+| Electricity grid | Energy returned to the grid | `sensor.solark_grid_export_energy` |
+| Home battery storage | Energy going in to the battery | `sensor.solark_battery_charge_energy` |
+| Home battery storage | Energy coming out of the battery | `sensor.solark_battery_discharge_energy` |
+
+The entity picker shows the entity's display name and device. Select the entries on
+the Sol-Ark plant device—for example, **Energy Total** and **PV Power** under
+**P-House** in the screenshot. The display name is optional and can be left unchanged.
+
+For **Type of power measurement** under **Home battery storage**, select **Two
+Sensors**, then choose:
+
+- **Power charging the battery:** `sensor.solark_battery_charge_power`
+- **Power discharging the battery:** `sensor.solark_battery_discharge_power`
+
+Select `sensor.solark_battery_soc` for **Battery state of charge sensor** and enter
+the usable battery capacity in kWh. Display names are only labels; correct any
+charge/discharge label copied from a previous selection so it describes the selected
+entity.
 
 Save the configuration and allow Home Assistant time to create long-term statistics.
 New energy entities normally need an hour or more before useful dashboard graphs appear.
 
-## How the totals work
-
-Solar production uses Sol-Ark's native cumulative plant counter. Grid import/export,
-battery charge/discharge, and load use persistent integration of the authoritative
-plant power-flow values because the observed cloud API does not provide proven
-plant-wide lifetime counters for them.
-
-Fallback totals:
-
-- are stored/restored by Home Assistant across restart and integration reload;
-- ignore unavailable samples and do not bridge prolonged API outages;
-- use separate nonnegative import/export and charge/discharge power streams;
-- start at zero when the entity is first created and cannot reconstruct earlier usage.
-
 ## Parallel systems
 
-Always choose the plant entities listed above. Per-inverter energy sensors are
-diagnostic information only. The integration never sums inverter counters into a plant
-total because counters can have different epochs after service or replacement.
+Choose the plant entities listed above for whole-site Energy Dashboard totals. Use
+per-inverter energy sensors only when you want to monitor an individual inverter.
 
 ## Troubleshooting
 

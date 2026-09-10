@@ -83,22 +83,32 @@ monitoring and troubleshooting.
 | `sensor.solark_battery_discharge_energy` | kWh | Total energy discharged from the battery |
 | `sensor.solark_load_energy` | kWh | Total site energy consumption |
 
-Available equipment sensors vary by inverter, battery, gateway, and firmware.
-Unsupported readings remain unavailable instead of displaying a misleading value.
+Open an equipment device in Home Assistant to see the sensors available for that
+inverter, battery, gateway, and firmware.
 
 ## Energy Dashboard setup
 
 No Riemann-sum helpers or template sensors are required.
 
-Open **Settings → Dashboards → Energy** and select:
+Open **Settings → Dashboards → Energy** and select the following entities from the
+Sol-Ark plant device:
 
-| Energy Dashboard field | Entity |
-|---|---|
-| Solar production | `sensor.solark_energy_total` |
-| Grid consumption | `sensor.solark_grid_import_energy` |
-| Return to grid | `sensor.solark_grid_export_energy` |
-| Battery energy in | `sensor.solark_battery_charge_energy` |
-| Battery energy out | `sensor.solark_battery_discharge_energy` |
+| Energy Dashboard section | Field | Entity |
+|---|---|---|
+| Solar panels | Solar production energy | `sensor.solark_energy_total` |
+| Solar panels | Solar production power | `sensor.solark_pv_power` |
+| Electricity grid | Energy consumed from the grid | `sensor.solark_grid_import_energy` |
+| Electricity grid | Energy returned to the grid | `sensor.solark_grid_export_energy` |
+| Home battery storage | Energy going in to the battery | `sensor.solark_battery_charge_energy` |
+| Home battery storage | Energy coming out of the battery | `sensor.solark_battery_discharge_energy` |
+
+The display name is optional and can be left unchanged.
+
+For the battery's **Type of power measurement**, select **Two Sensors**. Set
+`sensor.solark_battery_charge_power` as the charging power sensor and
+`sensor.solark_battery_discharge_power` as the discharging power sensor. Select
+`sensor.solark_battery_soc` for battery state of charge and enter the usable battery
+capacity in kWh.
 
 New energy sensors begin collecting statistics after installation, so dashboard data
 may take an hour or more to appear. See

@@ -10,6 +10,7 @@
 For the Energy Dashboard, select the integration's plant entities directly:
 
 - Solar: `sensor.solark_energy_total`
+- Solar production power: `sensor.solark_pv_power`
 - Grid consumption: `sensor.solark_grid_import_energy`
 - Grid return: `sensor.solark_grid_export_energy`
 - Battery in: `sensor.solark_battery_charge_energy`
@@ -20,7 +21,7 @@ No helpers or YAML template sensors are required. See
 
 Parallel installations also show gateway, inverter, and aggregate battery diagnostic
 devices. Use the plant entities for dashboards and automations that represent the whole
-site; equipment-level values are informational only.
+site. Use equipment entities to monitor or troubleshoot an individual device.
 
 If setup fails, verify the same credentials at `www.solarkcloud.com`. If an existing
 entry later rejects credentials, complete the Home Assistant reauthentication prompt.
