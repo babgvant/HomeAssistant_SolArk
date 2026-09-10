@@ -14,6 +14,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import SolArkDataUpdateCoordinator
+from .models import trapezoid_kwh
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -73,6 +74,9 @@ BATTERY_SENSORS = (
     SolArkSensorDescription(key="battery_temperature", name="Temperature", native_unit_of_measurement="°C", device_class=SensorDeviceClass.TEMPERATURE, state_class=SensorStateClass.MEASUREMENT, entity_category=D),
     energy("battery_charge_energy", "Charge Energy", False, D), energy("battery_discharge_energy", "Discharge Energy", False, D),
 )
+BATTERY_DEVICE_SENSORS = (
+    SolArkSensorDescription(key="status", name="Status", entity_category=D),
+)
 
 FALLBACK_ENERGY = (
     ("grid_import_energy", "Grid Import Energy", "grid_import_power"), ("grid_export_energy", "Grid Export Energy", "grid_export_power"),
@@ -92,6 +96,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entities += [SolArkSensor(coordinator, entry, "inverter", serial, desc) for desc in INVERTER_SENSORS]
         if inverter.get("battery"):
             entities += [SolArkSensor(coordinator, entry, "inverter_battery", serial, desc) for desc in BATTERY_SENSORS]
+    for serial in data["batteries"]:
+        entities += [SolArkSensor(coordinator, entry, "battery", serial, desc) for desc in BATTERY_DEVICE_SENSORS]
     async_add_entities(entities)
 
 
@@ -103,6 +109,8 @@ class SolArkSensor(CoordinatorEntity[SolArkDataUpdateCoordinator], SensorEntity)
         self._attr_has_entity_name = True
         legacy = scope == "plant" and description in PLANT_SENSORS[:9]
         self._attr_unique_id = f"{entry.entry_id}_{description.key}" if legacy else f"{entry.entry_id}:{scope}:{stable_id}:{description.key}"
+        if legacy:
+            self._attr_suggested_object_id = f"solark_{description.key}"
         self._attr_device_info = self._device_info()
 
     def _device_info(self) -> dict[str, Any]:
@@ -113,6 +121,17 @@ class SolArkSensor(CoordinatorEntity[SolArkDataUpdateCoordinator], SensorEntity)
         if self.scope == "gateway":
             item = data["gateways"][self.stable_id]
             return {"identifiers": {(DOMAIN, f"gateway:{self.stable_id}")}, "name": item["name"], "manufacturer": "Sol-Ark", "model": item.get("model"), "serial_number": item["serial"], "sw_version": item.get("sw_version"), "hw_version": item.get("hw_version"), "via_device": (DOMAIN, f"plant:{plant['id']}")}
+        if self.scope == "battery":
+            item = data["batteries"][self.stable_id]
+            inverter_serial = item.get("inverter_serial")
+            gateway_serial = item.get("gateway_serial")
+            if inverter_serial in data["inverters"]:
+                via = (DOMAIN, f"inverter:{inverter_serial}")
+            elif gateway_serial in data["gateways"]:
+                via = (DOMAIN, f"gateway:{gateway_serial}")
+            else:
+                via = (DOMAIN, f"plant:{plant['id']}")
+            return {"identifiers": {(DOMAIN, f"battery:{self.stable_id}")}, "name": item["name"], "manufacturer": "Sol-Ark", "model": item.get("model"), "serial_number": item["serial"], "via_device": via}
         inv = data["inverters"][self.stable_id]
         gateway = inv.get("gateway_serial")
         via = (DOMAIN, f"gateway:{gateway}") if gateway in data["gateways"] else (DOMAIN, f"plant:{plant['id']}")
@@ -123,6 +142,7 @@ class SolArkSensor(CoordinatorEntity[SolArkDataUpdateCoordinator], SensorEntity)
         data = self.coordinator.data
         if self.scope == "plant": return data["plant"]["values"]
         if self.scope == "gateway": return data["gateways"].get(self.stable_id, {}).get("values", {})
+        if self.scope == "battery": return data["batteries"].get(self.stable_id, {}).get("values", {})
         inv = data["inverters"].get(self.stable_id, {})
         return (inv.get("battery") or {}).get("values", {}) if self.scope == "inverter_battery" else inv.get("values", {})
 
@@ -147,6 +167,7 @@ class SolArkIntegratedEnergySensor(CoordinatorEntity[SolArkDataUpdateCoordinator
     def __init__(self, coordinator: SolArkDataUpdateCoordinator, entry: ConfigEntry, key: str, name: str, power_key: str) -> None:
         super().__init__(coordinator)
         self.power_key, self._attr_name, self._attr_unique_id = power_key, name, f"{entry.entry_id}_{key}"
+        self._attr_suggested_object_id = f"solark_{key}"
         plant = coordinator.data["plant"]
         self._attr_device_info = {"identifiers": {(DOMAIN, entry.entry_id), (DOMAIN, f"plant:{plant['id']}")}}
         self._total, self._last_power, self._last_sample = 0.0, None, None
@@ -176,6 +197,6 @@ class SolArkIntegratedEnergySensor(CoordinatorEntity[SolArkDataUpdateCoordinator
             seconds = (sample - self._last_sample).total_seconds()
             interval = self.coordinator.update_interval.total_seconds() if self.coordinator.update_interval else 60
             if 0 < seconds <= max(interval * 3, 180):
-                self._total += ((self._last_power + current) / 2) * seconds / 3_600_000
+                self._total += trapezoid_kwh(self._last_power, current, seconds)
         self._last_power, self._last_sample = current, sample
         self.async_write_ha_state()

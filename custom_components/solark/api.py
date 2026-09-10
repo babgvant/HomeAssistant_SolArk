@@ -75,6 +75,7 @@ class SolArkCloudAPIError(Exception):
 class SolArkCloudAuthenticationError(SolArkCloudAPIError):
     """Raised when Sol-Ark credentials are rejected."""
 
+
 class SolArkCloudAPI:
     """Sol-Ark Cloud API client."""
 
@@ -254,21 +255,19 @@ class SolArkCloudAPI:
                     resp.raise_for_status()
                 except aiohttp.ClientResponseError as e:
                     raise SolArkCloudAPIError(
-                        f"OAuth login HTTP {resp.status}: "
-                        f"{_redact_secret_text(text[:500])}"
+                        f"OAuth login HTTP {resp.status}"
                     ) from e
 
                 try:
                     result = await resp.json()
                 except Exception as e:  # noqa: BLE001
                     raise SolArkCloudAPIError(
-                        f"OAuth login invalid JSON: "
-                        f"{_redact_secret_text(text[:200])}"
+                        "OAuth login returned invalid JSON"
                     ) from e
         except asyncio.TimeoutError as e:  # noqa: BLE001
             raise SolArkCloudAPIError("OAuth login timeout") from e
         except aiohttp.ClientError as e:  # noqa: BLE001
-            raise SolArkCloudAPIError(f"OAuth login client error: {e}") from e
+            raise SolArkCloudAPIError(f"OAuth login client error: {type(e).__name__}") from e
 
         if not isinstance(result, dict):
             raise SolArkCloudAPIError("OAuth login response not JSON object")
@@ -328,21 +327,19 @@ class SolArkCloudAPI:
                     resp.raise_for_status()
                 except aiohttp.ClientResponseError as e:
                     raise SolArkCloudAPIError(
-                        f"Legacy login HTTP {resp.status}: "
-                        f"{_redact_secret_text(text[:500])}"
+                        f"Legacy login HTTP {resp.status}"
                     ) from e
 
                 try:
                     result = await resp.json()
                 except Exception as e:  # noqa: BLE001
                     raise SolArkCloudAPIError(
-                        f"Legacy login invalid JSON: "
-                        f"{_redact_secret_text(text[:200])}"
+                        "Legacy login returned invalid JSON"
                     ) from e
         except asyncio.TimeoutError as e:  # noqa: BLE001
             raise SolArkCloudAPIError("Legacy login timeout") from e
         except aiohttp.ClientError as e:  # noqa: BLE001
-            raise SolArkCloudAPIError(f"Legacy login client error: {e}") from e
+            raise SolArkCloudAPIError(f"Legacy login client error: {type(e).__name__}") from e
 
         if not isinstance(result, dict):
             raise SolArkCloudAPIError("Legacy login response not JSON object")

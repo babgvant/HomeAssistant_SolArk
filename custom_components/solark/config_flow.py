@@ -10,7 +10,12 @@ from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import SolArkCloudAPI, SolArkCloudAPIError, _redact_secret_text
+from .api import (
+    SolArkCloudAPI,
+    SolArkCloudAPIError,
+    SolArkCloudAuthenticationError,
+    _redact_secret_text,
+)
 from .const import (
     DOMAIN,
     CONF_USERNAME,
@@ -71,11 +76,16 @@ async def _test_connection(
                 CONF_AUTO_DISCOVER_API: auto_discover,
             }
         return False, "cannot_connect", None
-    except SolArkCloudAPIError as e:  # noqa: BLE001
+    except SolArkCloudAuthenticationError as e:
         _LOGGER.error(
             "SolArk test_connection failed: %s", _redact_secret_text(str(e))
         )
         return False, "auth_failed", None
+    except SolArkCloudAPIError as e:
+        _LOGGER.error(
+            "SolArk test_connection failed: %s", _redact_secret_text(str(e))
+        )
+        return False, "cannot_connect", None
     except Exception as e:  # noqa: BLE001
         _LOGGER.exception(
             "Unexpected exception testing SolArk connection: %s",

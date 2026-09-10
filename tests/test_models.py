@@ -61,5 +61,13 @@ class ParameterTests(unittest.TestCase):
         self.assertEqual(models.latest_parameter_values({"infos": None}), {})
 
 
+class EnergyIntegrationTests(unittest.TestCase):
+    def test_constant_one_kw_for_one_hour(self) -> None:
+        self.assertEqual(models.trapezoid_kwh(1000, 1000, 3600), 1.0)
+
+    def test_invalid_or_reverse_interval_is_ignored(self) -> None:
+        self.assertEqual(models.trapezoid_kwh(1000, 2000, -30), 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

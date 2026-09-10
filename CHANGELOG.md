@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [5.1.0] - 2026-09-10
+
+### Added
+
+- Plant, gateway, inverter, and aggregate battery device hierarchy with stable IDs.
+- Parallel inverter discovery and informational per-equipment diagnostics.
+- Plant battery charge/discharge power and Energy Dashboard-ready persistent energy
+  entities for grid import/export, battery charge/discharge, and load.
+- Native inverter PV/load/grid/battery/generator energy parsing from the portal API.
+- Cached topology/detail polling, partial auxiliary-endpoint failure handling, and
+  credential reauthentication.
+- Sanitized API research, HAR inventory tooling, and normalization tests.
+
+### Changed
+
+- Plant endpoints are authoritative; equipment metrics are never summed into plant
+  totals.
+- Daily energy counters now use reset-aware `total` semantics.
+- Missing API fields remain unavailable instead of being coerced to zero.
+- Diagnostics now report topology/features without serials, account IDs, or raw data.
+- Removed the requirement to create Energy Dashboard helpers manually.
+
+### Security
+
+- API routes, query values, response bodies, serials, and plant identifiers are no
+  longer emitted by request/debug logging.
+
 ## [5.0.2] - 2026-08-03
 
 ### Security

@@ -68,3 +68,9 @@ def latest_parameter_values(data: dict[str, Any]) -> dict[int, Any]:
                 result[int(series["id"])] = record["value"]
                 break
     return result
+
+
+def trapezoid_kwh(previous_watts: float, current_watts: float, seconds: float) -> float:
+    """Integrate two power samples into kWh using the trapezoidal rule."""
+    if seconds <= 0: return 0.0
+    return ((previous_watts + current_watts) / 2.0) * seconds / 3_600_000.0

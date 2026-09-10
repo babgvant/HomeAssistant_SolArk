@@ -7,7 +7,7 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, CONF_PASSWORD, CONF_USERNAME, CONF_PLANT_ID
+from .const import DOMAIN, CONF_PASSWORD, CONF_USERNAME, CONF_PLANT_ID, INTEGRATION_VERSION
 
 TO_REDACT = {
     CONF_PASSWORD,
@@ -27,6 +27,7 @@ async def async_get_config_entry_diagnostics(
     coordinator = data.get("coordinator")
 
     diag: dict[str, Any] = {
+        "integration_version": INTEGRATION_VERSION,
         "entry": {
             "title": "SolArk Cloud",
             "data": async_redact_data(dict(entry.data), TO_REDACT),

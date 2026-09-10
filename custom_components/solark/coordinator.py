@@ -97,7 +97,6 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         plant_values = _flow_values(flow)
         plant_values.update(
             {
-                "pv_power": _number(realtime.get("pac")) or plant_values.get("pv_power"),
                 "energy_today": _number(realtime.get("etoday")),
                 "energy_month": _number(realtime.get("emonth")),
                 "energy_year": _number(realtime.get("eyear")),
