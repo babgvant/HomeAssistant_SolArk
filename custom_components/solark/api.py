@@ -186,9 +186,13 @@ class SolArkCloudAPI:
                 try:
                     resp.raise_for_status()
                 except aiohttp.ClientResponseError as e:
+                    # A 403 can be scoped to a particular endpoint (for example,
+                    # accounts without access to optional gateway or battery
+                    # metadata).  Treating it as rejected credentials makes the
+                    # coordinator start a reauth flow even though login succeeded.
                     error_type = (
                         SolArkCloudAuthenticationError
-                        if resp.status in (401, 403)
+                        if resp.status == 401
                         else SolArkCloudAPIError
                     )
                     raise error_type(
