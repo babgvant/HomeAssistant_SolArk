@@ -82,9 +82,14 @@ monitoring and troubleshooting.
 | `sensor.solark_battery_charge_energy` | kWh | Total energy charged into the battery |
 | `sensor.solark_battery_discharge_energy` | kWh | Total energy discharged from the battery |
 | `sensor.solark_load_energy` | kWh | Total site energy consumption |
+| `sensor.solark_load_energy_today` | kWh | Site energy consumption today |
 
 Open an equipment device in Home Assistant to see the sensors available for that
-inverter, battery, gateway, and firmware.
+inverter, battery, gateway, and firmware. Equipment diagnostics expose all known
+values returned by the normalized API catalogue, including per-phase grid/output/load
+measurements, PV-string measurements, native daily and lifetime energy counters,
+battery limits and temperatures, generator measurements, connectivity, and operating
+flags. Unsupported values remain unavailable rather than reporting zero.
 
 ## Energy Dashboard setup
 

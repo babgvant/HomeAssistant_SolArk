@@ -30,16 +30,23 @@ def energy(key: str, name: str, daily: bool = False, category: EntityCategory | 
     return SolArkSensorDescription(key=key, name=name, native_unit_of_measurement="kWh", device_class=SensorDeviceClass.ENERGY, state_class=SensorStateClass.TOTAL if daily else SensorStateClass.TOTAL_INCREASING, entity_category=category)
 
 
+def measurement(key: str, name: str, unit: str, device_class: SensorDeviceClass, category: EntityCategory | None = None) -> SolArkSensorDescription:
+    return SolArkSensorDescription(key=key, name=name, native_unit_of_measurement=unit, device_class=device_class, state_class=SensorStateClass.MEASUREMENT, entity_category=category)
+
+
 PLANT_SENSORS = (
     power("pv_power", "PV Power"), power("battery_power", "Battery Power"),
     power("grid_power", "Grid Power (Net)"), power("load_power", "Load Power"),
     power("grid_import_power", "Grid Import Power"), power("grid_export_power", "Grid Export Power"),
     SolArkSensorDescription(key="battery_soc", name="Battery SOC", native_unit_of_measurement="%", device_class=SensorDeviceClass.BATTERY, state_class=SensorStateClass.MEASUREMENT),
     energy("energy_today", "Energy Today", daily=True), energy("energy_total", "Energy Total"),
+    energy("load_energy_today", "Load Energy Today", daily=True),
     power("battery_charge_power", "Battery Charge Power"), power("battery_discharge_power", "Battery Discharge Power"),
     power("generator_power", "Generator Power"), power("smart_load_power", "Smart Load Power"),
+    power("pv_power_1", "PV Power 1", EntityCategory.DIAGNOSTIC), power("pv_power_2", "PV Power 2", EntityCategory.DIAGNOSTIC), power("pv_power_3", "PV Power 3", EntityCategory.DIAGNOSTIC),
     energy("energy_month", "PV Energy This Month", daily=True), energy("energy_year", "PV Energy This Year", daily=True),
     SolArkSensorDescription(key="efficiency", name="Efficiency", native_unit_of_measurement="%", state_class=SensorStateClass.MEASUREMENT),
+    SolArkSensorDescription(key="status", name="Status", entity_category=EntityCategory.DIAGNOSTIC),
     SolArkSensorDescription(key="last_update", name="Last Update", device_class=SensorDeviceClass.TIMESTAMP, entity_category=EntityCategory.DIAGNOSTIC),
 )
 
@@ -48,20 +55,41 @@ GATEWAY_SENSORS = (
     SolArkSensorDescription(key="signal", name="Signal", native_unit_of_measurement="%", state_class=SensorStateClass.MEASUREMENT, entity_category=EntityCategory.DIAGNOSTIC),
     SolArkSensorDescription(key="last_communication", name="Last Communication", device_class=SensorDeviceClass.TIMESTAMP, entity_category=EntityCategory.DIAGNOSTIC),
     SolArkSensorDescription(key="connected_inverter_count", name="Connected Inverters", state_class=SensorStateClass.MEASUREMENT, entity_category=EntityCategory.DIAGNOSTIC),
+    measurement("upload_interval", "Upload Interval", "s", SensorDeviceClass.DURATION, EntityCategory.DIAGNOSTIC),
 )
 
 D = EntityCategory.DIAGNOSTIC
 INVERTER_SENSORS = (
     power("pv_power", "PV Power", D), power("load_power", "Load Power", D), power("grid_power", "Grid Power", D),
     power("battery_power", "Battery Power", D), power("generator_power", "Generator Power", D),
+    power("inverter_power", "Inverter Power", D), power("smart_load_power", "Smart Load Power", D),
+    power("battery_charge_power", "Battery Charge Power", D), power("battery_discharge_power", "Battery Discharge Power", D),
+    power("grid_import_power", "Grid Import Power", D), power("grid_export_power", "Grid Export Power", D),
+    power("load_power_l1", "Load Power L1", D), power("load_power_l2", "Load Power L2", D),
+    power("pv_power_1", "PV Power 1", D), power("pv_power_2", "PV Power 2", D), power("pv_power_3", "PV Power 3", D),
     energy("pv_energy_today", "PV Energy Today", True, D), energy("pv_energy", "PV Energy", False, D),
-    energy("load_energy", "Load Energy", False, D), energy("grid_import_energy", "Grid Import Energy", False, D),
+    energy("load_energy_today", "Load Energy Today", True, D), energy("load_energy", "Load Energy", False, D), energy("grid_import_energy", "Grid Import Energy", False, D),
+    energy("grid_import_energy_today", "Grid Import Energy Today", True, D), energy("grid_export_energy_today", "Grid Export Energy Today", True, D),
     energy("grid_export_energy", "Grid Export Energy", False, D), energy("battery_charge_energy", "Battery Charge Energy", False, D),
-    energy("battery_discharge_energy", "Battery Discharge Energy", False, D),
-    SolArkSensorDescription(key="grid_voltage_l1", name="Grid Voltage L1", native_unit_of_measurement="V", device_class=SensorDeviceClass.VOLTAGE, state_class=SensorStateClass.MEASUREMENT, entity_category=D),
-    SolArkSensorDescription(key="grid_voltage_l2", name="Grid Voltage L2", native_unit_of_measurement="V", device_class=SensorDeviceClass.VOLTAGE, state_class=SensorStateClass.MEASUREMENT, entity_category=D),
-    SolArkSensorDescription(key="grid_frequency", name="Grid Frequency", native_unit_of_measurement="Hz", device_class=SensorDeviceClass.FREQUENCY, state_class=SensorStateClass.MEASUREMENT, entity_category=D),
-    SolArkSensorDescription(key="inverter_temperature", name="Temperature", native_unit_of_measurement="°C", device_class=SensorDeviceClass.TEMPERATURE, state_class=SensorStateClass.MEASUREMENT, entity_category=D),
+    energy("battery_discharge_energy", "Battery Discharge Energy", False, D), energy("battery_charge_energy_today", "Battery Charge Energy Today", True, D),
+    energy("battery_discharge_energy_today", "Battery Discharge Energy Today", True, D), energy("generator_energy_today", "Generator Energy Today", True, D),
+    energy("generator_energy", "Generator Energy", False, D),
+    measurement("battery_soc", "Battery SOC", "%", SensorDeviceClass.BATTERY, D), measurement("bms_soc", "BMS SOC", "%", SensorDeviceClass.BATTERY, D),
+    measurement("battery_voltage", "Battery Voltage", "V", SensorDeviceClass.VOLTAGE, D), measurement("battery_current", "Battery Current", "A", SensorDeviceClass.CURRENT, D),
+    measurement("bms_voltage", "BMS Voltage", "V", SensorDeviceClass.VOLTAGE, D), measurement("bms_current", "BMS Current", "A", SensorDeviceClass.CURRENT, D),
+    measurement("battery_charge_current_limit", "Battery Charge Current Limit", "A", SensorDeviceClass.CURRENT, D), measurement("battery_discharge_current_limit", "Battery Discharge Current Limit", "A", SensorDeviceClass.CURRENT, D),
+    measurement("grid_voltage_l1", "Grid Voltage L1", "V", SensorDeviceClass.VOLTAGE, D), measurement("grid_voltage_l2", "Grid Voltage L2", "V", SensorDeviceClass.VOLTAGE, D), measurement("grid_voltage_l3", "Grid Voltage L3", "V", SensorDeviceClass.VOLTAGE, D),
+    measurement("grid_current_l1", "Grid Current L1", "A", SensorDeviceClass.CURRENT, D), measurement("grid_current_l2", "Grid Current L2", "A", SensorDeviceClass.CURRENT, D), measurement("grid_current_l3", "Grid Current L3", "A", SensorDeviceClass.CURRENT, D),
+    measurement("grid_frequency", "Grid Frequency", "Hz", SensorDeviceClass.FREQUENCY, D),
+    measurement("output_voltage_l1", "Output Voltage L1", "V", SensorDeviceClass.VOLTAGE, D), measurement("output_voltage_l2", "Output Voltage L2", "V", SensorDeviceClass.VOLTAGE, D), measurement("output_voltage_l3", "Output Voltage L3", "V", SensorDeviceClass.VOLTAGE, D),
+    measurement("output_current_l1", "Output Current L1", "A", SensorDeviceClass.CURRENT, D), measurement("output_current_l2", "Output Current L2", "A", SensorDeviceClass.CURRENT, D), measurement("output_current_l3", "Output Current L3", "A", SensorDeviceClass.CURRENT, D),
+    measurement("output_frequency", "Output Frequency", "Hz", SensorDeviceClass.FREQUENCY, D),
+    measurement("load_voltage_l1", "Load Voltage L1", "V", SensorDeviceClass.VOLTAGE, D), measurement("load_voltage_l2", "Load Voltage L2", "V", SensorDeviceClass.VOLTAGE, D),
+    measurement("generator_voltage", "Generator Voltage", "V", SensorDeviceClass.VOLTAGE, D), measurement("generator_frequency", "Generator Frequency", "Hz", SensorDeviceClass.FREQUENCY, D),
+    measurement("pv_voltage_1", "PV Voltage 1", "V", SensorDeviceClass.VOLTAGE, D), measurement("pv_voltage_2", "PV Voltage 2", "V", SensorDeviceClass.VOLTAGE, D), measurement("pv_voltage_3", "PV Voltage 3", "V", SensorDeviceClass.VOLTAGE, D),
+    measurement("pv_current_1", "PV Current 1", "A", SensorDeviceClass.CURRENT, D), measurement("pv_current_2", "PV Current 2", "A", SensorDeviceClass.CURRENT, D), measurement("pv_current_3", "PV Current 3", "A", SensorDeviceClass.CURRENT, D),
+    measurement("inverter_temperature", "Temperature", "°C", SensorDeviceClass.TEMPERATURE, D), measurement("dc_temperature", "DC Temperature", "°C", SensorDeviceClass.TEMPERATURE, D),
+    measurement("ac_temperature", "AC Temperature", "°C", SensorDeviceClass.TEMPERATURE, D), measurement("battery_temperature", "Battery Temperature", "°C", SensorDeviceClass.TEMPERATURE, D), measurement("bms_temperature", "BMS Temperature", "°C", SensorDeviceClass.TEMPERATURE, D),
     SolArkSensorDescription(key="status", name="Status", entity_category=D),
     SolArkSensorDescription(key="last_update", name="Last Update", device_class=SensorDeviceClass.TIMESTAMP, entity_category=D),
 )
@@ -71,8 +99,12 @@ BATTERY_SENSORS = (
     SolArkSensorDescription(key="battery_voltage", name="Voltage", native_unit_of_measurement="V", device_class=SensorDeviceClass.VOLTAGE, state_class=SensorStateClass.MEASUREMENT, entity_category=D),
     SolArkSensorDescription(key="battery_current", name="Current", native_unit_of_measurement="A", device_class=SensorDeviceClass.CURRENT, state_class=SensorStateClass.MEASUREMENT, entity_category=D),
     power("battery_power", "Power", D),
+    power("battery_charge_power", "Charge Power", D), power("battery_discharge_power", "Discharge Power", D),
     SolArkSensorDescription(key="battery_temperature", name="Temperature", native_unit_of_measurement="°C", device_class=SensorDeviceClass.TEMPERATURE, state_class=SensorStateClass.MEASUREMENT, entity_category=D),
+    measurement("battery_charge_current_limit", "Charge Current Limit", "A", SensorDeviceClass.CURRENT, D), measurement("battery_discharge_current_limit", "Discharge Current Limit", "A", SensorDeviceClass.CURRENT, D),
+    energy("battery_charge_energy_today", "Charge Energy Today", True, D), energy("battery_discharge_energy_today", "Discharge Energy Today", True, D),
     energy("battery_charge_energy", "Charge Energy", False, D), energy("battery_discharge_energy", "Discharge Energy", False, D),
+    SolArkSensorDescription(key="battery_status", name="Status", entity_category=D),
 )
 BATTERY_DEVICE_SENSORS = (
     SolArkSensorDescription(key="status", name="Status", entity_category=D),
@@ -109,7 +141,7 @@ class SolArkSensor(CoordinatorEntity[SolArkDataUpdateCoordinator], SensorEntity)
         self._attr_has_entity_name = True
         legacy = scope == "plant" and description in PLANT_SENSORS[:9]
         self._attr_unique_id = f"{entry.entry_id}_{description.key}" if legacy else f"{entry.entry_id}:{scope}:{stable_id}:{description.key}"
-        if legacy:
+        if legacy or (scope == "plant" and description.key == "load_energy_today"):
             self._attr_suggested_object_id = f"solark_{description.key}"
         self._attr_device_info = self._device_info()
 

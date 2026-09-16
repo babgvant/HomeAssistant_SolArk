@@ -53,6 +53,12 @@ class BatteryTests(unittest.TestCase):
 
 
 class ParameterTests(unittest.TestCase):
+    def test_extended_catalogue_parameters_are_requested(self) -> None:
+        self.assertEqual(models.PARAMETER_KEYS[73], "bms_soc")
+        self.assertEqual(models.PARAMETER_KEYS[85], "load_power_l1")
+        self.assertEqual(models.PARAMETER_KEYS[86], "load_power_l2")
+        self.assertTrue({73, 85, 86}.issubset(models.INVERTER_PARAMETER_IDS))
+
     def test_latest_parameter_record(self) -> None:
         data = {"infos": [{"id": 93, "records": [{"value": "10.1"}, {"value": None}, {"value": "10.4"}]}, {"id": 94, "records": {"list": [{"value": "2.3"}]}}]}
         self.assertEqual(models.latest_parameter_values(data), {93: "10.4", 94: "2.3"})

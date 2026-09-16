@@ -6,6 +6,9 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Native per-inverter and aggregated plant load-energy-today sensors.
+- Expose all normalized inverter electrical, energy, temperature, PV-string,
+  generator, gateway, battery-limit, status, and binary operating telemetry.
 - Plant, gateway, inverter, and aggregate battery device hierarchy with stable IDs.
 - Parallel inverter discovery and informational per-equipment diagnostics.
 - Plant battery charge/discharge power and Energy Dashboard-ready persistent energy

@@ -26,7 +26,7 @@ OBSOLETE_API_URLS = {
     "https://ecsprod-api.solarkcloud.com": DEFAULT_API_URL,
 }
 
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "binary_sensor"]
 
 
 def normalize_solark_urls(base_url: str, api_url: str) -> tuple[str, str]:

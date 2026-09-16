@@ -97,6 +97,7 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         plant_values = _flow_values(flow)
         plant_values.update(
             {
+                "status": plant_raw.get("status"),
                 "energy_today": _number(realtime.get("etoday")),
                 "energy_month": _number(realtime.get("emonth")),
                 "energy_year": _number(realtime.get("eyear")),
@@ -214,6 +215,13 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "gateway_serial": raw.get("gsn"),
                     "values": {"status": raw.get("status"), "online": raw.get("status") not in (None, 0)},
                 }
+
+        load_energy_today = [
+            inverter["values"].get("load_energy_today")
+            for inverter in normalized["inverters"].values()
+        ]
+        if load_energy_today and all(value is not None for value in load_energy_today):
+            normalized["plant"]["values"]["load_energy_today"] = sum(load_energy_today)
 
         normalized["features"] = {
             "plant_flow": bool(flow),
