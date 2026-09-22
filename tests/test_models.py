@@ -75,6 +75,23 @@ class EnergyIntegrationTests(unittest.TestCase):
         self.assertEqual(models.trapezoid_kwh(1000, 2000, -30), 0.0)
 
 
+class BalanceTests(unittest.TestCase):
+    def test_power_balance(self) -> None:
+        result = models.balance(
+            {"pv": 10456, "grid_in": 3280, "battery_out": 0,
+             "load": 13550, "grid_out": 0, "battery_in": 242},
+            ("pv", "grid_in", "battery_out"),
+            ("load", "grid_out", "battery_in"),
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result["source"], 13736)
+        self.assertEqual(result["sink"], 13792)
+        self.assertEqual(result["error"], -56)
+
+    def test_missing_balance_input_is_unavailable(self) -> None:
+        self.assertIsNone(models.balance({"pv": 1}, ("pv",), ("load",)))
+
+
 class ParallelAggregationTests(unittest.TestCase):
     INVERTERS = {
         "M-2511209953": {"values": {"pv_power": 4000, "pv_energy_today": 5.8, "pv_energy": 499.6}},

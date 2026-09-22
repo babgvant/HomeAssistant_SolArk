@@ -461,6 +461,13 @@ class SolArkCloudAPI:
         )
         return self._response_data(response)
 
+    async def async_get_plant_generation_use(self) -> Dict[str, Any]:
+        """Fetch the portal's daily production/use energy summary."""
+        response = await self._request(
+            "GET", f"/api/v1/plant/energy/{self.plant_id}/generation/use"
+        )
+        return self._response_data(response)
+
     async def async_get_inverter_flow(self, inverter_id: str | int) -> Dict[str, Any]:
         """Fetch an individual inverter's power flow."""
         response = await self._request("GET", f"/api/v1/inverter/{inverter_id}/flow")

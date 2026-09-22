@@ -12,7 +12,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import SolArkCloudAPI, SolArkCloudAPIError, SolArkCloudAuthenticationError
 from .const import CONF_PLANT_ID, CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
-from .models import INVERTER_PARAMETER_IDS, PARAMETER_KEYS, battery_values, complete_inverter_sum, flow_values, merge_inverter_topology, number
+from .models import INVERTER_PARAMETER_IDS, PARAMETER_KEYS, balance, battery_values, complete_inverter_sum, flow_values, merge_inverter_topology, number
 
 _LOGGER = logging.getLogger(__name__)
 METADATA_INTERVAL = timedelta(minutes=30)
@@ -93,6 +93,11 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             realtime = await self._optional(
                 "plant_realtime", self.api.async_get_plant_realtime(), errors
             ) or {}
+            generation_use = await self._optional(
+                "plant_generation_use",
+                self.api.async_get_plant_generation_use(),
+                errors,
+            ) or {}
         except SolArkCloudAuthenticationError as err:
             raise ConfigEntryAuthFailed("Sol-Ark credentials were rejected") from err
         except SolArkCloudAPIError as err:
@@ -124,6 +129,36 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "gateways": {},
             "inverters": {},
             "batteries": {},
+            "debug_diagnostics": {
+                "plant": {
+                    "plant_flow": {
+                        "endpoint": "/api/v1/plant/energy/{plant_id}/flow",
+                        "raw_pv_power": _number(flow.get("pvPower")),
+                        "raw_ac_coupled_power": _number(flow.get("minPower")),
+                        "load_power": _number(flow.get("loadOrEpsPower")),
+                        "battery_power": _number(flow.get("battPower")),
+                        "grid_power": _number(flow.get("gridOrMeterPower")),
+                        "direction_flags": {
+                            key: flow.get(key)
+                            for key in ("toBat", "batTo", "toGrid", "gridTo")
+                        },
+                    },
+                    "plant_realtime": {
+                        "endpoint": "/api/v1/plant/{plant_id}/realtime",
+                        "inverter_ac_power": _number(realtime.get("pac")),
+                        "raw_pv_energy_today": _number(realtime.get("etoday")),
+                        "raw_pv_cumulative_energy": _number(realtime.get("etotal")),
+                    },
+                    "generation_use": {
+                        "endpoint": "/api/v1/plant/energy/{plant_id}/generation/use",
+                        "raw_pv_energy": _number(generation_use.get("pv")),
+                        "load_energy": _number(generation_use.get("load")),
+                        "battery_charge_energy": _number(generation_use.get("batteryCharge")),
+                        "grid_export_energy": _number(generation_use.get("gridSell")),
+                    },
+                },
+                "inverters": {},
+            },
         }
 
         for raw in metadata.get("gateways", []):
@@ -173,10 +208,15 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._inverter_details_at = now
         details = [self._inverter_details.get(str(raw["sn"]), ({}, {}, {})) for raw in inverter_raw]
 
-        for raw, detail in zip(inverter_raw, details):
+        for inverter_index, (raw, detail) in enumerate(zip(inverter_raw, details), 1):
             serial = str(raw["sn"])
             flow_data, battery_data, measurements = detail
             values = _flow_values(flow_data or {})
+            measurement_values = {
+                PARAMETER_KEYS[parameter_id]: _number(value)
+                for parameter_id, value in (measurements or {}).items()
+                if parameter_id in PARAMETER_KEYS
+            }
             for parameter_id, value in (measurements or {}).items():
                 key = PARAMETER_KEYS.get(parameter_id)
                 if key and values.get(key) is None:
@@ -203,6 +243,45 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "gateway_serial": str(gateway_serial) if gateway_serial else None,
                 "values": values,
                 "battery": {"values": battery_values} if any(value is not None for value in battery_values.values()) else None,
+            }
+            # Deliberately use a positional label rather than serial/id so downloaded
+            # diagnostics remain safe to share with maintainers.
+            normalized["debug_diagnostics"]["inverters"][f"inverter_{inverter_index}"] = {
+                "summary": {
+                    "endpoint": "/api/v1/plant/{plant_id}/inverters",
+                    "inverter_ac_power": _number(raw.get("pac")),
+                    "raw_pv_energy_today": _number(raw.get("etoday")),
+                    "raw_pv_cumulative_energy": _number(raw.get("etotal")),
+                },
+                "flow": {
+                    "endpoint": "/api/v1/inverter/{inverter_id}/flow",
+                    "raw_pv_power": _number((flow_data or {}).get("pvPower")),
+                    "raw_ac_coupled_power": _number((flow_data or {}).get("minPower")),
+                    "load_power": _number((flow_data or {}).get("loadOrEpsPower")),
+                    "battery_power": _number((flow_data or {}).get("battPower")),
+                    "grid_power": _number((flow_data or {}).get("gridOrMeterPower")),
+                },
+                "day_parameters": {
+                    "endpoint": "/api/v1/inverter/{inverter_id}/day",
+                    **{
+                        key: values.get(key)
+                        if key not in measurement_values
+                        else measurement_values[key]
+                        for key in (
+                            "pv_power", "pv_energy_today", "pv_energy",
+                            "inverter_power", "load_power", "load_energy_today",
+                            "battery_power", "battery_charge_energy_today",
+                            "battery_discharge_energy_today", "grid_power",
+                            "grid_import_energy_today", "grid_export_energy_today",
+                        )
+                    },
+                },
+                "battery_realtime": {
+                    "endpoint": "/api/v1/inverter/battery/{inverter_id}/realtime",
+                    "battery_power": _number((battery_data or {}).get("power")),
+                    "battery_charge_energy_today": _number((battery_data or {}).get("etodayChg")),
+                    "battery_discharge_energy_today": _number((battery_data or {}).get("etodayDischg")),
+                },
             }
             if gateway_serial and str(gateway_serial) in normalized["gateways"]:
                 normalized["gateways"][str(gateway_serial)]["values"]["connected_inverter_count"] += 1
@@ -256,14 +335,17 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "pv_power", "grid_import_power", "battery_discharge_power",
             "load_power", "grid_export_power", "battery_charge_power",
         )
-        if all(plant_power.get(key) is not None for key in balance_keys):
-            sources = sum(plant_power[key] for key in balance_keys[:3])
-            sinks = sum(plant_power[key] for key in balance_keys[3:])
+        power_balance = balance(plant_power, balance_keys[:3], balance_keys[3:])
+        if power_balance is not None:
             normalized["energy_balance"] = {
-                **{key: plant_power[key] for key in balance_keys},
-                "sources_power": sources,
-                "sinks_power": sinks,
-                "balance_error": sources - sinks,
+                **{key: power_balance[key] for key in balance_keys},
+                "source_power": power_balance["source"],
+                "sink_power": power_balance["sink"],
+                "power_balance_error": power_balance["error"],
+                # Compatibility with the first diagnostic implementation.
+                "sources_power": power_balance["source"],
+                "sinks_power": power_balance["sink"],
+                "balance_error": power_balance["error"],
             }
             _LOGGER.debug("Sol-Ark site power balance: %s", normalized["energy_balance"])
         else:
@@ -277,9 +359,66 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if load_energy_today and all(value is not None for value in load_energy_today):
             normalized["plant"]["values"]["load_energy_today"] = sum(load_energy_today)
 
+        daily_inverter_keys = (
+            "grid_import_energy_today", "battery_discharge_energy_today",
+            "load_energy_today", "grid_export_energy_today",
+            "battery_charge_energy_today",
+        )
+        daily: dict[str, Any] = {"pv_energy_today": plant_power.get("energy_today")}
+        daily_sources: dict[str, Any] = {
+            "pv_energy_today": {
+                "endpoint": "/api/v1/plant/{plant_id}/inverters",
+                "aggregation_method": "complete_sum_per_inverter",
+            }
+        }
+        for key in daily_inverter_keys:
+            total, contributors = complete_inverter_sum(normalized["inverters"], key)
+            daily[key] = total
+            daily_sources[key] = {
+                "endpoint": "/api/v1/inverter/{inverter_id}/day",
+                "aggregation_method": "complete_sum_per_inverter",
+                "contributing_inverter_count": len(contributors),
+                "expected_inverter_count": len(normalized["inverters"]),
+            }
+        # Battery realtime supplies the same native daily counters on firmware that
+        # omits parameter IDs 81/82 from the day endpoint.
+        for key in ("battery_charge_energy_today", "battery_discharge_energy_today"):
+            if daily[key] is None:
+                battery_total = 0.0
+                available = True
+                for inverter in normalized["inverters"].values():
+                    value = (inverter.get("battery") or {}).get("values", {}).get(key)
+                    if value is None:
+                        available = False
+                        break
+                    battery_total += value
+                if available and normalized["inverters"]:
+                    daily[key] = battery_total
+                    daily_sources[key]["endpoint"] = "/api/v1/inverter/battery/{inverter_id}/realtime"
+        energy_keys = (
+            "pv_energy_today", "grid_import_energy_today",
+            "battery_discharge_energy_today", "load_energy_today",
+            "grid_export_energy_today", "battery_charge_energy_today",
+        )
+        energy_balance = balance(daily, energy_keys[:3], energy_keys[3:])
+        normalized["energy_balance_today"] = None if energy_balance is None else {
+            **{key: energy_balance[key] for key in energy_keys},
+            "source_energy": energy_balance["source"],
+            "sink_energy": energy_balance["sink"],
+            "energy_balance_error": energy_balance["error"],
+            "sources": daily_sources,
+        }
+        normalized["debug_diagnostics"]["power_balance"] = normalized["energy_balance"]
+        normalized["debug_diagnostics"]["energy_balance_today"] = normalized["energy_balance_today"]
+        _LOGGER.debug(
+            "Sol-Ark endpoint measurement diagnostics: %s",
+            normalized["debug_diagnostics"],
+        )
+
         normalized["features"] = {
             "plant_flow": bool(flow),
             "plant_pv_energy": realtime.get("etotal") is not None,
+            "plant_generation_use": bool(generation_use),
             "gateways": bool(normalized["gateways"]),
             "multiple_inverters": len(normalized["inverters"]) > 1,
             "individual_batteries": bool(normalized["batteries"]),

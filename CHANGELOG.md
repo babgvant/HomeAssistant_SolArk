@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- Added redacted endpoint-by-endpoint PV, inverter AC, load, battery, and grid
+  measurements to Home Assistant diagnostics.
+- Added explicit source/sink power and native daily-energy balance diagnostics.
+- Added the plant `generation/use` endpoint as a diagnostic cross-check for the
+  portal's PV, load, battery-charge, and grid-export energy summary.
 - Fix whole-site PV power, today, and lifetime totals for parallel systems by using a
   completeness-checked sum of per-inverter values.
 - Add aggregate provenance/completeness attributes and instantaneous power-balance

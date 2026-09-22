@@ -136,6 +136,34 @@ response is shorter. It cannot identify an inverter that the API has never retur
 during the current Home Assistant process, so `expected_inverters` must be checked
 against the physical installation when diagnosing an initially incomplete list.
 
+### 2026-09-22 energy-balance capture
+
+A second sanitized capture was compared with independent load-center measurements
+after the per-inverter aggregation change. At approximately 12:50, every captured
+Sol-Ark production representation agreed; no separate API field contained the roughly
+15.4 kWh discrepancy:
+
+- Plant realtime: `pac=10456`, `etoday=19.8` kWh.
+- Plant generation/use: `pv=19.7`, `load=10.4`, `batteryCharge=8.8`,
+  `gridSell=0.5` kWh. These rounded values balance internally.
+- Inverter summaries: `pac=5080/0/5376` W and `etoday=7.6/3.5/8.7` kWh.
+  Both sums reproduce the plant realtime fields exactly.
+- Plant flow: PV 10,456 W, grid import 3,280 W, load 13,550 W, and battery
+  charge 242 W. The 56 W residual is consistent with endpoint rounding or sampling.
+- Per-inverter flows sum to the plant flow values for PV, grid, load, and battery.
+  `minPower` was zero and the AC-coupled/microinverter flags were false.
+
+This establishes that summing the three `etoday` fields is not the cause of this
+particular shortfall: the sum is merely another representation of the same cloud
+production total. It does not establish that the independently measured load is
+wrong. Rather, the captured Sol-Ark model describes a smaller, internally balanced
+energy boundary than the load-center measurements. Likely explanations outside the
+captured production fields include loads outside the Sol-Ark CT boundary, load-center
+monitor configuration/direction, or production that is not connected to or detected
+by the Sol-Ark (`minPower=0`). The integration now includes selected raw measurements,
+their redacted endpoint routes, and power/daily-energy balances in HA diagnostics so
+the boundary can be compared without substituting Emporia-derived production.
+
 ## Proposed Home Assistant device hierarchy
 
 ```text

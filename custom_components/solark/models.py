@@ -98,6 +98,26 @@ def complete_inverter_sum(
     return total, contributors
 
 
+def balance(
+    values: dict[str, Any],
+    source_keys: tuple[str, ...],
+    sink_keys: tuple[str, ...],
+) -> dict[str, Any] | None:
+    """Calculate a source/sink balance only when every input is available."""
+    keys = source_keys + sink_keys
+    numeric = {key: number(values.get(key)) for key in keys}
+    if any(value is None for value in numeric.values()):
+        return None
+    source = sum(numeric[key] for key in source_keys)  # type: ignore[arg-type]
+    sink = sum(numeric[key] for key in sink_keys)  # type: ignore[arg-type]
+    return {
+        **numeric,
+        "source": source,
+        "sink": sink,
+        "error": source - sink,
+    }
+
+
 def merge_inverter_topology(
     previous: list[dict[str, Any]], current: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:

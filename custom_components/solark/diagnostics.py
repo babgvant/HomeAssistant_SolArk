@@ -58,6 +58,8 @@ async def async_get_config_entry_diagnostics(
             "endpoint_errors": coordinator_data.get("endpoint_errors", {}),
             "aggregation": coordinator_data.get("aggregation", {}),
             "energy_balance": coordinator_data.get("energy_balance"),
+            "energy_balance_today": coordinator_data.get("energy_balance_today"),
+            "endpoint_measurements": coordinator_data.get("debug_diagnostics", {}),
             "plant_data_keys": sorted(
                 coordinator_data.get("plant", {}).get("values", {}).keys()
             ),
