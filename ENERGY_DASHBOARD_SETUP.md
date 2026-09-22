@@ -39,6 +39,12 @@ New energy entities normally need an hour or more before useful dashboard graphs
 Choose the plant entities listed above for whole-site Energy Dashboard totals. Use
 per-inverter energy sensors only when you want to monitor an individual inverter.
 
+For parallel systems, plant PV power and energy are completeness-checked sums of the
+discovered inverter PV values. Inspect `contributing_inverters`,
+`expected_inverters`, and `aggregation_method` when a value is unavailable. Load,
+grid, and battery power retain the site-wide Sol-Ark plant-flow values. Their
+`energy_balance` attribute can reveal disagreement between reported sources and sinks.
+
 ## Troubleshooting
 
 If an entity is absent, restart Home Assistant after updating the integration. If it is

@@ -12,7 +12,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import SolArkCloudAPI, SolArkCloudAPIError, SolArkCloudAuthenticationError
 from .const import CONF_PLANT_ID, CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
-from .models import INVERTER_PARAMETER_IDS, PARAMETER_KEYS, battery_values, flow_values, number
+from .models import INVERTER_PARAMETER_IDS, PARAMETER_KEYS, battery_values, complete_inverter_sum, flow_values, merge_inverter_topology, number
 
 _LOGGER = logging.getLogger(__name__)
 METADATA_INTERVAL = timedelta(minutes=30)
@@ -74,7 +74,12 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if gateways is not None:
             self._metadata["gateways"] = gateways
         if inverters is not None:
-            self._metadata["inverters"] = inverters
+            # Some Sol-Ark responses intermittently omit a parallel slave. Once a
+            # physical inverter has been discovered, keep it in the expected topology
+            # so a short response cannot turn a partial aggregate into a valid total.
+            self._metadata["inverters"] = merge_inverter_topology(
+                self._metadata.get("inverters", []), inverters
+            )
         if batteries is not None:
             self._metadata["batteries"] = batteries
         self._metadata_at = now
@@ -180,8 +185,8 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 {
                     "status": raw.get("status"),
                     "online": raw.get("status") not in (None, 0),
-                    "pv_energy_today": _number(raw.get("etoday")) or values.get("pv_energy_today"),
-                    "pv_energy": _number(raw.get("etotal")) or values.get("pv_energy"),
+                    "pv_energy_today": _number(raw.get("etoday")) if _number(raw.get("etoday")) is not None else values.get("pv_energy_today"),
+                    "pv_energy": _number(raw.get("etotal")) if _number(raw.get("etotal")) is not None else values.get("pv_energy"),
                     "last_update": raw.get("updateAt"),
                 }
             )
@@ -215,6 +220,55 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "gateway_serial": raw.get("gsn"),
                     "values": {"status": raw.get("status"), "online": raw.get("status") not in (None, 0)},
                 }
+
+        # PV flow and counters are demonstrably per-inverter in parallel systems;
+        # Sol-Ark's nominal plant PV fields can omit a slave. Publish no partial sum.
+        # Conversely, load/grid/battery power remain the authoritative plant-flow
+        # values: their direction flags are plant-level and summing device fields can
+        # double-count master/system readings on other firmware/API variants.
+        aggregation: dict[str, dict[str, Any]] = {}
+        for plant_key, inverter_key in (
+            ("pv_power", "pv_power"),
+            ("energy_today", "pv_energy_today"),
+            ("energy_total", "pv_energy"),
+        ):
+            total, contributors = complete_inverter_sum(
+                normalized["inverters"], inverter_key
+            )
+            aggregation[plant_key] = {
+                "contributing_inverters": contributors,
+                "expected_inverters": len(normalized["inverters"]),
+                "aggregation_method": "sum_per_inverter",
+            }
+            normalized["plant"]["values"][plant_key] = total
+
+        for key in (
+            "load_power", "grid_power", "grid_import_power", "grid_export_power",
+            "battery_power", "battery_charge_power", "battery_discharge_power",
+        ):
+            aggregation[key] = {
+                "aggregation_method": "authoritative_site_flow",
+                "expected_inverters": len(normalized["inverters"]),
+            }
+
+        plant_power = normalized["plant"]["values"]
+        balance_keys = (
+            "pv_power", "grid_import_power", "battery_discharge_power",
+            "load_power", "grid_export_power", "battery_charge_power",
+        )
+        if all(plant_power.get(key) is not None for key in balance_keys):
+            sources = sum(plant_power[key] for key in balance_keys[:3])
+            sinks = sum(plant_power[key] for key in balance_keys[3:])
+            normalized["energy_balance"] = {
+                **{key: plant_power[key] for key in balance_keys},
+                "sources_power": sources,
+                "sinks_power": sinks,
+                "balance_error": sources - sinks,
+            }
+            _LOGGER.debug("Sol-Ark site power balance: %s", normalized["energy_balance"])
+        else:
+            normalized["energy_balance"] = None
+        normalized["aggregation"] = aggregation
 
         load_energy_today = [
             inverter["values"].get("load_energy_today")

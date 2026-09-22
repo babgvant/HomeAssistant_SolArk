@@ -60,6 +60,26 @@ plant device. Use plant entities for dashboards and automations representing the
 entire installation. Inverter and gateway entities are intended for equipment
 monitoring and troubleshooting.
 
+### Parallel-inverter aggregation
+
+Sol-Ark Cloud does not give consistent plant PV totals for every parallel system.
+The integration calculates whole-site PV power, PV energy today, and PV lifetime
+energy by summing the corresponding value from every discovered physical inverter.
+The site value is unavailable unless every expected inverter contributes; it is never
+silently calculated from only part of the system. These entities expose
+`contributing_inverters`, `expected_inverters`, and `aggregation_method` attributes.
+
+Load, grid, and battery power use the plant flow endpoint. It supplies site-level
+values and direction flags (grid import/export and battery charge/discharge), while
+summing inverter copies could double-count firmware that repeats a master/system
+value. Their aggregate entities identify the method as `authoritative_site_flow`.
+PV/load/grid/battery power entities also include an `energy_balance` attribute with
+source power, sink power, and instantaneous balance error. A large error diagnoses
+incomplete or inconsistent cloud telemetry; it is not an Energy Dashboard correction.
+If the inverter-list endpoint has never exposed a physical inverter since startup,
+the integration cannot infer that device. Diagnostics will show the discovered
+`expected_inverters` count; this remains a Sol-Ark Cloud API limitation.
+
 ## Main plant sensors
 
 | Entity | Unit | Description |

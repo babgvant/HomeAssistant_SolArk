@@ -108,7 +108,7 @@ The following IDs are API catalogue IDs, not customer identifiers:
 
 ## Evidence about parallel systems
 
-The sanitized capture has three inverters and two gateways. At the same timestamp:
+The original sanitized capture has three inverters and two gateways. At the same timestamp:
 
 - Inverter PV powers sum exactly to plant PV power.
 - Inverter battery magnitudes sum exactly to plant battery magnitude.
@@ -117,11 +117,24 @@ The sanitized capture has three inverters and two gateways. At the same timestam
 - Inverter PV-today values sum exactly to plant PV-today.
 - Inverter PV-lifetime values do **not** sum to the plant PV-lifetime value.
 
-Therefore plant flow and plant realtime are authoritative for aggregate entities.
-Individual flow endpoints are authoritative only for their inverter entities. The
-integration must not construct plant power by summing inverter power. The mismatch in
-lifetime PV also proves that summing arbitrary per-inverter lifetime counters would be
-unsafe, possibly because of device replacement, counter epochs, or cloud aggregation.
+Later field evidence from another three-inverter installation showed that the plant
+PV fields omitted part of the physical system: inverter PV lifetime counters totaled
+977.5 kWh while plant lifetime PV reported 873.7 kWh; PV today totaled 14.5 kWh while
+plant PV today reported 11.7 kWh. Sol-Ark's plant-PV behavior therefore varies by
+installation/API response and cannot be treated as authoritative.
+
+The implementation sums the clearly per-inverter PV power, PV-today, and PV-lifetime
+fields, but only when all discovered inverters contribute. It does not use a partial
+sum when a master or slave endpoint is unavailable. Load, grid, and battery power
+continue to use plant flow: the capture establishes those as site-wide signed or
+directional values, and summing unproven inverter fields could double-count a repeated
+master/system reading. Other inverter energy counters remain diagnostic until their
+cross-installation semantics are established.
+
+The integration retains previously discovered topology when a later inverter-list
+response is shorter. It cannot identify an inverter that the API has never returned
+during the current Home Assistant process, so `expected_inverters` must be checked
+against the physical installation when diagnosing an initially incomplete list.
 
 ## Proposed Home Assistant device hierarchy
 
@@ -201,7 +214,10 @@ Battery entities:
 
 Native and preferred:
 
-- Plant PV today/month/year/lifetime (`etoday`, `emonth`, `eyear`, `etotal`).
+- Per-inverter PV today/lifetime, summed only with complete inverter coverage.
+- Plant PV month/year (`emonth`, `eyear`); their multi-inverter semantics remain an
+  API limitation because matching per-inverter monthly/yearly counters were not
+  established.
 - Per-inverter PV today/lifetime (96/97 and inverter summary).
 - Per-inverter load today/lifetime (83/84).
 - Per-inverter grid import/export today (91/92) and lifetime (93/94).

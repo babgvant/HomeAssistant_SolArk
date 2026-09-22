@@ -187,6 +187,24 @@ class SolArkSensor(CoordinatorEntity[SolArkDataUpdateCoordinator], SensorEntity)
         return value
 
     @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Explain the provenance and completeness of site aggregate values."""
+        if self.scope != "plant":
+            return None
+        attributes = dict(
+            self.coordinator.data.get("aggregation", {}).get(
+                self.entity_description.key, {}
+            )
+        )
+        if self.entity_description.key in {
+            "pv_power", "load_power", "grid_power", "battery_power"
+        }:
+            balance = self.coordinator.data.get("energy_balance")
+            if balance is not None:
+                attributes["energy_balance"] = balance
+        return attributes or None
+
+    @property
     def available(self) -> bool:
         return super().available and self.native_value is not None
 

@@ -75,5 +75,42 @@ class EnergyIntegrationTests(unittest.TestCase):
         self.assertEqual(models.trapezoid_kwh(1000, 2000, -30), 0.0)
 
 
+class ParallelAggregationTests(unittest.TestCase):
+    INVERTERS = {
+        "M-2511209953": {"values": {"pv_power": 4000, "pv_energy_today": 5.8, "pv_energy": 499.6}},
+        "S1-2511269707": {"values": {"pv_power": 2500, "pv_energy_today": 3.5, "pv_energy": 239.7}},
+        "S2-2511259993": {"values": {"pv_power": 3000, "pv_energy_today": 5.2, "pv_energy": 238.2}},
+    }
+
+    def test_three_inverter_pv_totals(self) -> None:
+        total, contributors = models.complete_inverter_sum(self.INVERTERS, "pv_energy")
+        self.assertAlmostEqual(total, 977.5)
+        self.assertEqual(contributors, list(self.INVERTERS))
+        self.assertEqual(models.complete_inverter_sum(self.INVERTERS, "pv_energy_today")[0], 14.5)
+        self.assertEqual(models.complete_inverter_sum(self.INVERTERS, "pv_power")[0], 9500)
+
+    def test_unavailable_slave_does_not_publish_partial_total(self) -> None:
+        inverters = {serial: {"values": dict(item["values"])} for serial, item in self.INVERTERS.items()}
+        del inverters["S2-2511259993"]["values"]["pv_power"]
+        total, contributors = models.complete_inverter_sum(inverters, "pv_power")
+        self.assertIsNone(total)
+        self.assertEqual(contributors, ["M-2511209953", "S1-2511269707"])
+
+    def test_unavailable_master_does_not_publish_partial_total(self) -> None:
+        inverters = {serial: {"values": dict(item["values"])} for serial, item in self.INVERTERS.items()}
+        inverters["M-2511209953"]["values"]["pv_energy_today"] = None
+        self.assertIsNone(models.complete_inverter_sum(inverters, "pv_energy_today")[0])
+
+    def test_site_value_is_not_part_of_per_inverter_sum(self) -> None:
+        # The known-bad cloud site value (873.7) must not be added or preferred.
+        self.assertEqual(models.complete_inverter_sum(self.INVERTERS, "pv_energy")[0], 977.5)
+
+    def test_short_inverter_list_does_not_reduce_expected_topology(self) -> None:
+        previous = [{"sn": serial, "id": index} for index, serial in enumerate(self.INVERTERS)]
+        current = previous[:2]
+        merged = models.merge_inverter_topology(previous, current)
+        self.assertEqual([item["sn"] for item in merged], list(self.INVERTERS))
+
+
 if __name__ == "__main__":
     unittest.main()

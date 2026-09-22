@@ -74,3 +74,40 @@ def trapezoid_kwh(previous_watts: float, current_watts: float, seconds: float) -
     """Integrate two power samples into kWh using the trapezoidal rule."""
     if seconds <= 0: return 0.0
     return ((previous_watts + current_watts) / 2.0) * seconds / 3_600_000.0
+
+
+def complete_inverter_sum(
+    inverters: dict[str, dict[str, Any]], key: str
+) -> tuple[float | None, list[str]]:
+    """Sum a proven per-inverter field only when every inverter contributes.
+
+    A partial total is more harmful than an unavailable value for a site aggregate:
+    Home Assistant would otherwise record a false drop whenever one Sol-Ark endpoint
+    omits a parallel inverter.
+    """
+    contributors: list[str] = []
+    total = 0.0
+    for serial, inverter in inverters.items():
+        value = number(inverter.get("values", {}).get(key))
+        if value is None:
+            continue
+        contributors.append(serial)
+        total += value
+    if not inverters or len(contributors) != len(inverters):
+        return None, contributors
+    return total, contributors
+
+
+def merge_inverter_topology(
+    previous: list[dict[str, Any]], current: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Retain discovered inverters when Sol-Ark returns a transient short list."""
+    by_serial = {
+        str(item["sn"]): item
+        for item in previous
+        if isinstance(item, dict) and item.get("sn")
+    }
+    for item in current:
+        if isinstance(item, dict) and item.get("sn"):
+            by_serial[str(item["sn"])] = item
+    return list(by_serial.values())

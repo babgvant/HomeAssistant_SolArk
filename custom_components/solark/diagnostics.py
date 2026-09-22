@@ -56,6 +56,8 @@ async def async_get_config_entry_diagnostics(
             ),
             "features": coordinator_data.get("features", {}),
             "endpoint_errors": coordinator_data.get("endpoint_errors", {}),
+            "aggregation": coordinator_data.get("aggregation", {}),
+            "energy_balance": coordinator_data.get("energy_balance"),
             "plant_data_keys": sorted(
                 coordinator_data.get("plant", {}).get("values", {}).keys()
             ),

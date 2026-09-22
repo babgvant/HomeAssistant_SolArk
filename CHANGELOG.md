@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- Fix whole-site PV power, today, and lifetime totals for parallel systems by using a
+  completeness-checked sum of per-inverter values.
+- Add aggregate provenance/completeness attributes and instantaneous power-balance
+  diagnostics.
+- Preserve previously discovered inverter topology across transient short API lists.
+
 ## [5.1.0] - 2026-09-10
 
 ### Added
