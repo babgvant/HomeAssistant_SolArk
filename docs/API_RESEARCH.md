@@ -164,6 +164,15 @@ by the Sol-Ark (`minPower=0`). The integration now includes selected raw measure
 their redacted endpoint routes, and power/daily-energy balances in HA diagnostics so
 the boundary can be compared without substituting Emporia-derived production.
 
+An initial diagnostic download after this change compared fresh plant realtime
+(`etoday=24.5`) against inverter summaries totaling 23.0 kWh. The latter had been
+cached for up to 30 minutes, so the 1.5 kWh difference was not evidence of a
+simultaneous API disagreement. Inverter summaries now refresh on every plant poll;
+diagnostics include per-inverter sample age and mark cached summaries as stale when
+the current list omits a known inverter. Day-parameter diagnostics display only
+values actually returned by that endpoint. The site power balance uses plant-flow
+power directly, even if all optional inverter-flow responses are empty.
+
 ## Proposed Home Assistant device hierarchy
 
 ```text

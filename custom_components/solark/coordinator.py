@@ -35,6 +35,7 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.entry = entry
         self._metadata: dict[str, Any] | None = None
         self._metadata_at: datetime | None = None
+        self._inverter_summary_at: dict[str, datetime] = {}
         self._inverter_details: dict[str, tuple[Any, Any, Any]] = {}
         self._inverter_details_at: datetime | None = None
         interval = int(entry.options.get(CONF_SCAN_INTERVAL, entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)))
@@ -61,10 +62,9 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         now = datetime.now(timezone.utc)
         if self._metadata is not None and self._metadata_at and now - self._metadata_at < METADATA_INTERVAL:
             return self._metadata
-        plant, gateways, inverters, batteries = await asyncio.gather(
+        plant, gateways, batteries = await asyncio.gather(
             self._optional("plant_metadata", self.api.async_get_plant_metadata(), errors),
             self._optional("gateways", self.api.async_get_gateways(), errors),
-            self._optional("inverters", self.api.async_get_inverters(), errors),
             self._optional("batteries", self.api.async_get_batteries(), errors),
         )
         if self._metadata is None:
@@ -73,13 +73,6 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._metadata["plant"] = plant
         if gateways is not None:
             self._metadata["gateways"] = gateways
-        if inverters is not None:
-            # Some Sol-Ark responses intermittently omit a parallel slave. Once a
-            # physical inverter has been discovered, keep it in the expected topology
-            # so a short response cannot turn a partial aggregate into a valid total.
-            self._metadata["inverters"] = merge_inverter_topology(
-                self._metadata.get("inverters", []), inverters
-            )
         if batteries is not None:
             self._metadata["batteries"] = batteries
         self._metadata_at = now
@@ -87,8 +80,24 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         errors: dict[str, str] = {}
+        fresh_inverter_serials: set[str] = set()
         try:
             metadata = await self._refresh_metadata(errors)
+            inverter_summaries = await self._optional(
+                "inverters", self.api.async_get_inverters(), errors
+            )
+            if inverter_summaries is not None:
+                fresh_inverter_serials = {
+                    str(item["sn"]) for item in inverter_summaries
+                    if isinstance(item, dict) and item.get("sn")
+                }
+                # Preserve known devices when the cloud briefly returns a short list.
+                metadata["inverters"] = merge_inverter_topology(
+                    metadata.get("inverters", []), inverter_summaries
+                )
+                summary_at = datetime.now(timezone.utc)
+                for serial in fresh_inverter_serials:
+                    self._inverter_summary_at[serial] = summary_at
             flow = await self.api.async_get_plant_flow()
             realtime = await self._optional(
                 "plant_realtime", self.api.async_get_plant_realtime(), errors
@@ -145,6 +154,7 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     },
                     "plant_realtime": {
                         "endpoint": "/api/v1/plant/{plant_id}/realtime",
+                        "source_update_at": realtime.get("updateAt"),
                         "inverter_ac_power": _number(realtime.get("pac")),
                         "raw_pv_energy_today": _number(realtime.get("etoday")),
                         "raw_pv_cumulative_energy": _number(realtime.get("etotal")),
@@ -189,14 +199,14 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         if refresh_details:
             tasks = []
-            for raw in inverter_raw:
+            for inverter_index, raw in enumerate(inverter_raw, 1):
                 serial = str(raw["sn"])
                 inverter_id = raw["id"]
                 tasks.append(
                     asyncio.gather(
-                        self._optional("inverter_flow", self.api.async_get_inverter_flow(inverter_id), errors),
-                        self._optional("inverter_battery", self.api.async_get_inverter_battery(inverter_id, serial), errors),
-                        self._optional("inverter_measurements", self.api.async_get_inverter_measurements(inverter_id, serial, INVERTER_PARAMETER_IDS), errors),
+                        self._optional(f"inverter_flow_{inverter_index}", self.api.async_get_inverter_flow(inverter_id), errors),
+                        self._optional(f"inverter_battery_{inverter_index}", self.api.async_get_inverter_battery(inverter_id, serial), errors),
+                        self._optional(f"inverter_measurements_{inverter_index}", self.api.async_get_inverter_measurements(inverter_id, serial, INVERTER_PARAMETER_IDS), errors),
                     )
                 )
             try:
@@ -207,9 +217,14 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._inverter_details[str(raw["sn"])] = tuple(detail)
             self._inverter_details_at = now
         details = [self._inverter_details.get(str(raw["sn"]), ({}, {}, {})) for raw in inverter_raw]
+        detail_age_seconds = (
+            (now - self._inverter_details_at).total_seconds()
+            if self._inverter_details_at is not None else None
+        )
 
         for inverter_index, (raw, detail) in enumerate(zip(inverter_raw, details), 1):
             serial = str(raw["sn"])
+            summary_fresh = serial in fresh_inverter_serials
             flow_data, battery_data, measurements = detail
             values = _flow_values(flow_data or {})
             measurement_values = {
@@ -225,8 +240,8 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 {
                     "status": raw.get("status"),
                     "online": raw.get("status") not in (None, 0),
-                    "pv_energy_today": _number(raw.get("etoday")) if _number(raw.get("etoday")) is not None else values.get("pv_energy_today"),
-                    "pv_energy": _number(raw.get("etotal")) if _number(raw.get("etotal")) is not None else values.get("pv_energy"),
+                    "pv_energy_today": _number(raw.get("etoday")) if summary_fresh else None,
+                    "pv_energy": _number(raw.get("etotal")) if summary_fresh else None,
                     "last_update": raw.get("updateAt"),
                 }
             )
@@ -249,12 +264,20 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             normalized["debug_diagnostics"]["inverters"][f"inverter_{inverter_index}"] = {
                 "summary": {
                     "endpoint": "/api/v1/plant/{plant_id}/inverters",
+                    "status": "current" if summary_fresh else "stale_cached",
+                    "source_update_at": raw.get("updateAt"),
+                    "sample_age_seconds": (
+                        (now - self._inverter_summary_at[serial]).total_seconds()
+                        if serial in self._inverter_summary_at else None
+                    ),
                     "inverter_ac_power": _number(raw.get("pac")),
                     "raw_pv_energy_today": _number(raw.get("etoday")),
                     "raw_pv_cumulative_energy": _number(raw.get("etotal")),
                 },
                 "flow": {
                     "endpoint": "/api/v1/inverter/{inverter_id}/flow",
+                    "status": "available" if flow_data else "empty_or_unavailable",
+                    "sample_age_seconds": detail_age_seconds,
                     "raw_pv_power": _number((flow_data or {}).get("pvPower")),
                     "raw_ac_coupled_power": _number((flow_data or {}).get("minPower")),
                     "load_power": _number((flow_data or {}).get("loadOrEpsPower")),
@@ -263,10 +286,10 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 },
                 "day_parameters": {
                     "endpoint": "/api/v1/inverter/{inverter_id}/day",
+                    "status": "available" if measurements else "empty_or_unavailable",
+                    "sample_age_seconds": detail_age_seconds,
                     **{
-                        key: values.get(key)
-                        if key not in measurement_values
-                        else measurement_values[key]
+                        key: measurement_values.get(key)
                         for key in (
                             "pv_power", "pv_energy_today", "pv_energy",
                             "inverter_power", "load_power", "load_energy_today",
@@ -278,6 +301,8 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 },
                 "battery_realtime": {
                     "endpoint": "/api/v1/inverter/battery/{inverter_id}/realtime",
+                    "status": "available" if battery_data else "empty_or_unavailable",
+                    "sample_age_seconds": detail_age_seconds,
                     "battery_power": _number((battery_data or {}).get("power")),
                     "battery_charge_energy_today": _number((battery_data or {}).get("etodayChg")),
                     "battery_discharge_energy_today": _number((battery_data or {}).get("etodayDischg")),
@@ -319,7 +344,21 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "expected_inverters": len(normalized["inverters"]),
                 "aggregation_method": "sum_per_inverter",
             }
+            if plant_key == "pv_power" and total is None and plant_values.get("pv_power") is not None:
+                total = plant_values["pv_power"]
+                aggregation[plant_key]["aggregation_method"] = "plant_flow_fallback"
             normalized["plant"]["values"][plant_key] = total
+
+        normalized["debug_diagnostics"]["pv_comparison"] = {
+            "plant_realtime_today": _number(realtime.get("etoday")),
+            "inverter_summary_sum_today": normalized["plant"]["values"].get("energy_today"),
+            "generation_use_pv": _number(generation_use.get("pv")),
+            "plant_minus_inverter_today": (
+                _number(realtime.get("etoday")) - normalized["plant"]["values"]["energy_today"]
+                if _number(realtime.get("etoday")) is not None
+                and normalized["plant"]["values"].get("energy_today") is not None else None
+            ),
+        }
 
         for key in (
             "load_power", "grid_power", "grid_import_power", "grid_export_power",
@@ -335,10 +374,14 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "pv_power", "grid_import_power", "battery_discharge_power",
             "load_power", "grid_export_power", "battery_charge_power",
         )
-        power_balance = balance(plant_power, balance_keys[:3], balance_keys[3:])
+        # The plant flow contains a coherent site snapshot even when optional
+        # per-inverter flow endpoints return empty objects.
+        plant_flow_power = {**plant_power, "pv_power": _flow_values(flow).get("pv_power")}
+        power_balance = balance(plant_flow_power, balance_keys[:3], balance_keys[3:])
         if power_balance is not None:
             normalized["energy_balance"] = {
                 **{key: power_balance[key] for key in balance_keys},
+                "source_endpoint": "/api/v1/plant/energy/{plant_id}/flow",
                 "source_power": power_balance["source"],
                 "sink_power": power_balance["sink"],
                 "power_balance_error": power_balance["error"],
@@ -401,6 +444,10 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "grid_export_energy_today", "battery_charge_energy_today",
         )
         energy_balance = balance(daily, energy_keys[:3], energy_keys[3:])
+        normalized["debug_diagnostics"]["energy_today_inputs"] = daily
+        normalized["debug_diagnostics"]["energy_today_missing_fields"] = [
+            key for key in energy_keys if daily.get(key) is None
+        ]
         normalized["energy_balance_today"] = None if energy_balance is None else {
             **{key: energy_balance[key] for key in energy_keys},
             "source_energy": energy_balance["source"],

@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- Refresh inverter summaries on every plant poll so PV energy comparisons use
+  readings from the same polling cycle. Mark absent inverter summaries as stale.
+- Report endpoint availability and sample age; keep inverter day-parameter
+  diagnostics separate from inverter-summary fallback values.
+- Compute the instantaneous diagnostic balance from plant flow when optional
+  inverter flow responses are empty, and use plant PV flow as a power fallback.
 - Added redacted endpoint-by-endpoint PV, inverter AC, load, battery, and grid
   measurements to Home Assistant diagnostics.
 - Added explicit source/sink power and native daily-energy balance diagnostics.
