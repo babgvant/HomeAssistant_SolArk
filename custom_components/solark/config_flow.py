@@ -235,6 +235,10 @@ class SolArkOptionsFlowHandler(config_entries.OptionsFlow):
             return self.async_create_entry(
                 title="",
                 data={
+                    **{key: user_input[key] for key in (
+                        "diagnostic_capture", "diagnostic_drop_percent", "diagnostic_min_watts",
+                        "diagnostic_pre_samples", "diagnostic_post_samples", "diagnostic_event_limit",
+                    ) if key in user_input},
                     CONF_SCAN_INTERVAL: int(
                         user_input.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
                     ),
@@ -255,6 +259,12 @@ class SolArkOptionsFlowHandler(config_entries.OptionsFlow):
 
         options_schema = vol.Schema(
             {
+                vol.Optional("diagnostic_capture", default=self.config_entry.options.get("diagnostic_capture", False)): bool,
+                vol.Optional("diagnostic_drop_percent", default=self.config_entry.options.get("diagnostic_drop_percent", 25)): vol.All(vol.Coerce(int), vol.Range(min=5, max=100)),
+                vol.Optional("diagnostic_min_watts", default=self.config_entry.options.get("diagnostic_min_watts", 500)): vol.All(vol.Coerce(int), vol.Range(min=0, max=100000)),
+                vol.Optional("diagnostic_pre_samples", default=self.config_entry.options.get("diagnostic_pre_samples", 10)): vol.All(vol.Coerce(int), vol.Range(min=1, max=120)),
+                vol.Optional("diagnostic_post_samples", default=self.config_entry.options.get("diagnostic_post_samples", 10)): vol.All(vol.Coerce(int), vol.Range(min=1, max=120)),
+                vol.Optional("diagnostic_event_limit", default=self.config_entry.options.get("diagnostic_event_limit", 20)): vol.All(vol.Coerce(int), vol.Range(min=1, max=50)),
                 vol.Optional(
                     CONF_AUTO_DISCOVER_API,
                     default=current_auto,

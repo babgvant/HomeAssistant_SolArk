@@ -13,6 +13,16 @@ _SPEC.loader.exec_module(models)
 
 
 class FlowTests(unittest.TestCase):
+    def test_parameter_source_time_matches_selected_nonmissing_record(self):
+        data = {"infos": [{"id": 467, "records": [
+            {"time": "2026-10-05 12:01:52", "value": "1234"},
+            {"time": "2026-10-05 12:06:52", "value": None},
+        ]}]}
+        self.assertEqual(models.latest_parameter_values(data), {467: "1234"})
+        self.assertEqual(models.latest_parameter_times(data), {467: "2026-10-05T12:01:52"})
+        data["infos"][0]["records"][0]["time"] = "private token"
+        self.assertIsNone(models.latest_parameter_times(data)[467])
+
     def test_grid_import_and_battery_charge_split(self) -> None:
         values = models.flow_values({"pvPower": 4000, "minPower": 50, "existsMin": True, "battPower": 1200, "toBat": True, "gridOrMeterPower": 300, "gridTo": True, "loadOrEpsPower": 3150})
         self.assertEqual(values["pv_power"], 4050)

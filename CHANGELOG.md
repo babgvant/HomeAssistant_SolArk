@@ -4,12 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- 5.1.1: remove potentially partial plant PV fallback for incomplete inverter sums;
+  preserve valid zeros and plant-flow battery/load/grid handling.
+- Add opt-in bounded power event capture with endpoint latency/errors, cache ages
+  and inverter parameter source times in downloadable diagnostics.
+
 - Refresh inverter summaries on every plant poll so PV energy comparisons use
   readings from the same polling cycle. Mark absent inverter summaries as stale.
 - Report endpoint availability and sample age; keep inverter day-parameter
   diagnostics separate from inverter-summary fallback values.
 - Compute the instantaneous diagnostic balance from plant flow when optional
-  inverter flow responses are empty, and use plant PV flow as a power fallback.
+  inverter flow responses are empty.
 - Added redacted endpoint-by-endpoint PV, inverter AC, load, battery, and grid
   measurements to Home Assistant diagnostics.
 - Added explicit source/sink power and native daily-energy balance diagnostics.

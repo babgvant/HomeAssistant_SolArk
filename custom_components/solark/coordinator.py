@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 import logging
+from time import monotonic
 from typing import Any, Awaitable
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntryAuthFailed
@@ -12,6 +13,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import SolArkCloudAPI, SolArkCloudAPIError, SolArkCloudAuthenticationError
 from .const import CONF_PLANT_ID, CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+from .capture import PowerCapture
 from .models import INVERTER_PARAMETER_IDS, PARAMETER_KEYS, balance, battery_values, complete_inverter_sum, flow_values, merge_inverter_topology, number
 
 _LOGGER = logging.getLogger(__name__)
@@ -33,6 +35,8 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     ) -> None:
         self.api = api
         self.entry = entry
+        self.power_capture = PowerCapture(entry.options)
+        self._endpoint_timing: dict[str, Any] = {}
         self._metadata: dict[str, Any] | None = None
         self._metadata_at: datetime | None = None
         self._inverter_summary_at: dict[str, datetime] = {}
@@ -49,14 +53,21 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     async def _optional(self, name: str, request: Awaitable[Any], errors: dict[str, str]) -> Any:
+        started = monotonic()
+        timing = {"started_at_utc": datetime.now(timezone.utc).isoformat()}
+        self._endpoint_timing[name] = timing
         try:
             return await request
         except SolArkCloudAuthenticationError:
+            errors[name] = "SolArkCloudAuthenticationError"
             raise
         except (SolArkCloudAPIError, ValueError, TypeError) as err:
             errors[name] = type(err).__name__
             _LOGGER.debug("Optional Sol-Ark endpoint %s failed: %s", name, type(err).__name__)
             return None
+        finally:
+            timing["latency_ms"] = round((monotonic() - started) * 1000, 1)
+            timing["error"] = errors.get(name)
 
     async def _refresh_metadata(self, errors: dict[str, str]) -> dict[str, Any]:
         now = datetime.now(timezone.utc)
@@ -80,6 +91,7 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         errors: dict[str, str] = {}
+        self._endpoint_timing = {}
         fresh_inverter_serials: set[str] = set()
         try:
             metadata = await self._refresh_metadata(errors)
@@ -98,7 +110,10 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 summary_at = datetime.now(timezone.utc)
                 for serial in fresh_inverter_serials:
                     self._inverter_summary_at[serial] = summary_at
-            flow = await self.api.async_get_plant_flow()
+            flow = await self._optional("plant_flow", self.api.async_get_plant_flow(), errors)
+            if flow is None:
+                self.power_capture.record({"endpoint_errors": errors}, self._endpoint_timing)
+                raise UpdateFailed("Sol-Ark plant flow request failed")
             realtime = await self._optional(
                 "plant_realtime", self.api.async_get_plant_realtime(), errors
             ) or {}
@@ -108,6 +123,7 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 errors,
             ) or {}
         except SolArkCloudAuthenticationError as err:
+            self.power_capture.record({"endpoint_errors": errors}, self._endpoint_timing)
             raise ConfigEntryAuthFailed("Sol-Ark credentials were rejected") from err
         except SolArkCloudAPIError as err:
             raise UpdateFailed(str(err)) from err
@@ -212,6 +228,7 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             try:
                 refreshed = await asyncio.gather(*tasks) if tasks else []
             except SolArkCloudAuthenticationError as err:
+                self.power_capture.record({"endpoint_errors": errors}, self._endpoint_timing)
                 raise ConfigEntryAuthFailed("Sol-Ark credentials were rejected") from err
             for raw, detail in zip(inverter_raw, refreshed):
                 self._inverter_details[str(raw["sn"])] = tuple(detail)
@@ -277,17 +294,24 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "flow": {
                     "endpoint": "/api/v1/inverter/{inverter_id}/flow",
                     "status": "available" if flow_data else "empty_or_unavailable",
-                    "sample_age_seconds": detail_age_seconds,
+                    "sample_age_seconds": detail_age_seconds if flow_data else None,
                     "raw_pv_power": _number((flow_data or {}).get("pvPower")),
                     "raw_ac_coupled_power": _number((flow_data or {}).get("minPower")),
                     "load_power": _number((flow_data or {}).get("loadOrEpsPower")),
                     "battery_power": _number((flow_data or {}).get("battPower")),
                     "grid_power": _number((flow_data or {}).get("gridOrMeterPower")),
+                    "direction_flags": {key: (flow_data or {}).get(key)
+                                        for key in ("toBat", "batTo", "toGrid", "gridTo")},
                 },
                 "day_parameters": {
                     "endpoint": "/api/v1/inverter/{inverter_id}/day",
                     "status": "available" if measurements else "empty_or_unavailable",
-                    "sample_age_seconds": detail_age_seconds,
+                    "sample_age_seconds": detail_age_seconds if measurements else None,
+                    "source_sample_times": {
+                        PARAMETER_KEYS[key]: value
+                        for key, value in getattr(self.api, "parameter_sample_times", {}).get(str(raw["id"]), {}).items()
+                        if key in PARAMETER_KEYS and measurements
+                    },
                     **{
                         key: measurement_values.get(key)
                         for key in (
@@ -302,7 +326,7 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "battery_realtime": {
                     "endpoint": "/api/v1/inverter/battery/{inverter_id}/realtime",
                     "status": "available" if battery_data else "empty_or_unavailable",
-                    "sample_age_seconds": detail_age_seconds,
+                    "sample_age_seconds": detail_age_seconds if battery_data else None,
                     "battery_power": _number((battery_data or {}).get("power")),
                     "battery_charge_energy_today": _number((battery_data or {}).get("etodayChg")),
                     "battery_discharge_energy_today": _number((battery_data or {}).get("etodayDischg")),
@@ -344,9 +368,8 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "expected_inverters": len(normalized["inverters"]),
                 "aggregation_method": "sum_per_inverter",
             }
-            if plant_key == "pv_power" and total is None and plant_values.get("pv_power") is not None:
-                total = plant_values["pv_power"]
-                aggregation[plant_key]["aggregation_method"] = "plant_flow_fallback"
+            if total is None:
+                aggregation[plant_key]["aggregation_method"] = "incomplete_inverter_sum"
             normalized["plant"]["values"][plant_key] = total
 
         normalized["debug_diagnostics"]["pv_comparison"] = {
@@ -474,4 +497,5 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 for inverter in normalized["inverters"].values()
             ),
         }
+        self.power_capture.record(normalized, self._endpoint_timing)
         return normalized

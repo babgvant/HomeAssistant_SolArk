@@ -36,10 +36,21 @@ async def async_get_config_entry_diagnostics(
     }
 
     if coordinator is not None:
+        diag["power_capture"] = coordinator.power_capture.export()
         coordinator_data = coordinator.data or {}
         inverters = coordinator_data.get("inverters", {})
         gateways = coordinator_data.get("gateways", {})
         batteries = coordinator_data.get("batteries", {})
+        labels = {serial: f"inverter_{index}" for index, serial in enumerate(inverters, 1)}
+        aggregation = {
+            key: {
+                **value,
+                **({"contributing_inverters": [labels.get(serial, "unknown_inverter")
+                    for serial in value["contributing_inverters"]]}
+                   if "contributing_inverters" in value else {}),
+            }
+            for key, value in coordinator_data.get("aggregation", {}).items()
+        }
         diag["coordinator"] = {
             "last_update_success": coordinator.last_update_success,
             "last_successful_refresh": coordinator_data.get("fetched_at"),
@@ -56,7 +67,7 @@ async def async_get_config_entry_diagnostics(
             ),
             "features": coordinator_data.get("features", {}),
             "endpoint_errors": coordinator_data.get("endpoint_errors", {}),
-            "aggregation": coordinator_data.get("aggregation", {}),
+            "aggregation": aggregation,
             "energy_balance": coordinator_data.get("energy_balance"),
             "energy_balance_today": coordinator_data.get("energy_balance_today"),
             "endpoint_measurements": coordinator_data.get("debug_diagnostics", {}),

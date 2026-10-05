@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any
+from datetime import datetime
 
 INVERTER_PARAMETER_IDS = (16,17,18,19,20,21,23,24,25,26,27,28,29,30,31,34,35,44,45,46,60,67,68,70,71,73,75,76,77,78,79,80,81,82,83,84,85,86,91,92,93,94,96,97,98,101,102,103,104,209,210,465,466,467,596,597,598,599,600,601,602,603,604,607,608,609,610,611)
 
@@ -66,6 +67,28 @@ def latest_parameter_values(data: dict[str, Any]) -> dict[int, Any]:
         for record in reversed(records):
             if isinstance(record, dict) and record.get("value") is not None:
                 result[int(series["id"])] = record["value"]
+                break
+    return result
+
+
+def latest_parameter_times(data: dict[str, Any]) -> dict[int, str | None]:
+    """Keep timestamps for the latest nonmissing records; naive times stay naive."""
+    infos = data.get("infos")
+    if isinstance(infos, dict): infos = infos.get("list")
+    if not isinstance(infos, list): return {}
+    result = {}
+    for series in infos:
+        if not isinstance(series, dict) or series.get("id") is None: continue
+        records = series.get("records")
+        if isinstance(records, dict): records = records.get("list")
+        if not isinstance(records, list): continue
+        for record in reversed(records):
+            if isinstance(record, dict) and record.get("value") is not None:
+                try:
+                    timestamp = datetime.fromisoformat(str(record.get("time")).replace("Z", "+00:00")).isoformat()
+                except ValueError:
+                    timestamp = None
+                result[int(series["id"])] = timestamp
                 break
     return result
 

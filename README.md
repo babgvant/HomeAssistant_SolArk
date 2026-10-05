@@ -171,6 +171,11 @@ If sensors become unavailable:
 Diagnostics contain integration and equipment-health information but omit credentials,
 tokens, serial numbers, and account identifiers.
 
+For recurring power dips, enable **bounded power diagnostic capture** in the
+integration's **Configure** options, leave it running, then download diagnostics
+before reloading or restarting. See [power-dip investigation](docs/POWER_DIP_INVESTIGATION.md)
+for deployment, limits, interpretation and unattended validation.
+
 ## Support
 
 Report problems through [GitHub Issues](https://github.com/babgvant/HomeAssistant_SolArk/issues).

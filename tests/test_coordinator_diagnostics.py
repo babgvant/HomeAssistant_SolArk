@@ -90,15 +90,55 @@ class FakeAPI:
 
 
 class CoordinatorDiagnosticsTests(unittest.TestCase):
-    def test_empty_inverter_flows_use_plant_snapshot_and_report_true_provenance(self):
+    def test_partial_power_is_unavailable_and_zero_is_valid(self):
+        module = load_coordinator()
+        api = FakeAPI()
+        powers = {1: 13105, 2: 253}
+        async def flow(inverter_id):
+            value = powers[inverter_id]
+            return {} if value is None else {"pvPower": value}
+        api.async_get_inverter_flow = flow
+        entry = types.SimpleNamespace(data={"plant_id": "site"}, options={"diagnostic_capture": True}, title="Site")
+        coordinator = module.SolArkDataUpdateCoordinator(None, entry, api)
+        first = asyncio.run(coordinator._async_update_data())
+        self.assertEqual(first["plant"]["values"]["pv_power"], 13358)
+        powers[2] = None
+        coordinator._inverter_details_at = None
+        second = asyncio.run(coordinator._async_update_data())
+        self.assertIsNone(second["plant"]["values"]["pv_power"])
+        self.assertEqual(second["plant"]["values"]["battery_power"], 0)
+        self.assertIsNone(second["debug_diagnostics"]["inverters"]["inverter_2"]["flow"]["sample_age_seconds"])
+        powers[2] = 0
+        coordinator._inverter_details_at = None
+        third = asyncio.run(coordinator._async_update_data())
+        self.assertEqual(third["plant"]["values"]["pv_power"], 13105)
+        exported = coordinator.power_capture.export()
+        self.assertIn("incomplete_inverter_total", exported["events"][0]["triggers"][0]["reasons"])
+        self.assertNotIn('"one"', __import__('json').dumps(exported))
+        self.assertIn("latency_ms", exported["rolling_samples"][-1]["endpoint_timing"]["plant_flow"])
+
+    def test_required_endpoint_failure_is_captured(self):
+        module = load_coordinator()
+        api = FakeAPI()
+        async def fail(): raise module.SolArkCloudAPIError("secret response")
+        api.async_get_plant_flow = fail
+        entry = types.SimpleNamespace(data={"plant_id": "site"}, options={"diagnostic_capture": True}, title="Site")
+        coordinator = module.SolArkDataUpdateCoordinator(None, entry, api)
+        with self.assertRaises(module.UpdateFailed):
+            asyncio.run(coordinator._async_update_data())
+        exported = coordinator.power_capture.export()
+        self.assertEqual(exported["total_events"], 1)
+        self.assertNotIn("secret", str(exported))
+
+    def test_empty_inverter_flows_do_not_publish_a_questionable_plant_total(self):
         module = load_coordinator()
         api = FakeAPI()
         entry = types.SimpleNamespace(data={"plant_id": "site"}, options={}, title="Site")
         coordinator = module.SolArkDataUpdateCoordinator(None, entry, api)
         first = asyncio.run(coordinator._async_update_data())
 
-        self.assertEqual(first["aggregation"]["pv_power"]["aggregation_method"], "plant_flow_fallback")
-        self.assertEqual(first["plant"]["values"]["pv_power"], 300)
+        self.assertEqual(first["aggregation"]["pv_power"]["aggregation_method"], "incomplete_inverter_sum")
+        self.assertIsNone(first["plant"]["values"]["pv_power"])
         self.assertEqual(first["energy_balance"]["power_balance_error"], 0)
         self.assertIsNone(first["debug_diagnostics"]["inverters"]["inverter_1"]["day_parameters"]["pv_energy_today"])
         self.assertEqual(first["debug_diagnostics"]["inverters"]["inverter_1"]["flow"]["status"], "empty_or_unavailable")

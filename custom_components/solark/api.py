@@ -9,7 +9,7 @@ from typing import Any, Dict, Iterable, Optional
 
 import aiohttp
 
-from .models import latest_parameter_values
+from .models import latest_parameter_values, latest_parameter_times
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -91,6 +91,7 @@ class SolArkCloudAPI:
         self.username = username
         self.password = password
         self.plant_id = plant_id
+        self.parameter_sample_times: dict[str, dict[int, str | None]] = {}
 
         self.base_url = base_url.rstrip("/")
         self.api_url = api_url.rstrip("/")
@@ -503,7 +504,9 @@ class SolArkCloudAPI:
                 "lan": "en",
             },
         )
-        return latest_parameter_values(self._response_data(response))
+        data = self._response_data(response)
+        self.parameter_sample_times[str(inverter_id)] = latest_parameter_times(data)
+        return latest_parameter_values(data)
 
     # ------------------------------------------------------------------
     # plant data

@@ -5,9 +5,9 @@ needed for normal installation or operation.
 
 ## Data authority
 
-Plant-level flow and realtime responses are authoritative for operational and Energy
-Dashboard entities. Gateway and inverter readings are informational only. Do not sum
-inverter measurements to produce plant totals.
+Whole-site PV power and PV counters use completeness-checked per-inverter sums.
+Plant flow supplies load, grid and battery power and their direction flags. Missing
+PV contributors produce unavailable, never a potentially partial plant PV fallback.
 
 The analyzed parallel installation demonstrated that instantaneous inverter powers
 could match the plant aggregate while lifetime inverter counters did not necessarily
@@ -32,7 +32,8 @@ counters use `SensorStateClass.TOTAL_INCREASING`.
 
 - Plant flow is refreshed at the configured polling interval.
 - Plant realtime energy information is refreshed with the plant poll.
-- Topology and metadata are cached for 30 minutes.
+- Plant metadata is cached for 30 minutes; inverter summaries refresh every poll
+  and known topology survives a short list.
 - Informational inverter flow, battery, and parameter details are cached for five
   minutes.
 - Failure of an optional equipment endpoint should affect only that data group.
