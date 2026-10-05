@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- Fix options-flow startup on Home Assistant 2025.12 and later by using the
+  framework-provided read-only config entry property.
+
 - 5.1.1: remove potentially partial plant PV fallback for incomplete inverter sums;
   preserve valid zeros and plant-flow battery/load/grid handling.
 - Add opt-in bounded power event capture with endpoint latency/errors, cache ages
