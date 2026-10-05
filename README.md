@@ -65,9 +65,23 @@ monitoring and troubleshooting.
 Sol-Ark Cloud does not give consistent plant PV totals for every parallel system.
 The integration calculates whole-site PV power, PV energy today, and PV lifetime
 energy by summing the corresponding value from every discovered physical inverter.
-The site value is unavailable unless every expected inverter contributes; it is never
-silently calculated from only part of the system. These entities expose
+Energy totals require every expected inverter to contribute. PV power can fall back
+to plant flow when all six PV/grid/battery/load balance inputs are finite,
+nonnegative, and agree within the larger of 500 W or 5% of total flow. It also
+rejects plant PV below known inverter production beyond that tolerance. Active
+generator or nonzero Smart Load/AC-coupled modes cannot use this fallback.
+Rejected plant samples retain the last accepted plant PV for at most two minutes,
+then become unavailable. A complete inverter sum remains preferred. These entities expose
 `contributing_inverters`, `expected_inverters`, and `aggregation_method` attributes.
+PV power also exposes `plant_flow_sanity` and fallback `sample_age_seconds`.
+This check catches inconsistent snapshots, but cannot detect a consistently partial
+cloud snapshot. PV power in watts can legitimately decrease; only accumulated
+energy in kWh is expected to rise during a day before its daily reset.
+
+Plant flow, realtime energy, and inverter summaries poll every 30 seconds by
+default (configurable in integration options). Inverter detail telemetry refreshes
+every five minutes; gateway/plant metadata refreshes every 30 minutes. Cloud source
+readings may be older than the polling time.
 
 Load, grid, and battery power use the plant flow endpoint. It supplies site-level
 values and direction flags (grid import/export and battery charge/discharge), while

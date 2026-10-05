@@ -14,11 +14,12 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .api import SolArkCloudAPI, SolArkCloudAPIError, SolArkCloudAuthenticationError
 from .const import CONF_PLANT_ID, CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
 from .capture import PowerCapture
-from .models import INVERTER_PARAMETER_IDS, PARAMETER_KEYS, balance, battery_values, complete_inverter_sum, flow_values, merge_inverter_topology, number
+from .models import INVERTER_PARAMETER_IDS, PARAMETER_KEYS, balance, battery_values, complete_inverter_sum, flow_values, merge_inverter_topology, number, plant_pv_sanity
 
 _LOGGER = logging.getLogger(__name__)
 METADATA_INTERVAL = timedelta(minutes=30)
 INVERTER_DETAIL_INTERVAL = timedelta(minutes=5)
+PLANT_PV_HOLD_INTERVAL = timedelta(minutes=2)
 _number = number
 _flow_values = flow_values
 _battery_values = battery_values
@@ -42,6 +43,7 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._inverter_summary_at: dict[str, datetime] = {}
         self._inverter_details: dict[str, tuple[Any, Any, Any]] = {}
         self._inverter_details_at: datetime | None = None
+        self._last_valid_plant_pv: tuple[float, datetime] | None = None
         interval = int(entry.options.get(CONF_SCAN_INTERVAL, entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)))
         super().__init__(
             hass,
@@ -350,7 +352,8 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 }
 
         # PV flow and counters are demonstrably per-inverter in parallel systems;
-        # Sol-Ark's nominal plant PV fields can omit a slave. Publish no partial sum.
+        # Sol-Ark's nominal plant PV fields can omit a slave. Never publish a
+        # partial inverter sum; plant-power fallback must pass a consistency check.
         # Conversely, load/grid/battery power remain the authoritative plant-flow
         # values: their direction flags are plant-level and summing device fields can
         # double-count master/system readings on other firmware/API variants.
@@ -371,6 +374,37 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if total is None:
                 aggregation[plant_key]["aggregation_method"] = "incomplete_inverter_sum"
             normalized["plant"]["values"][plant_key] = total
+
+        pv_aggregation = aggregation["pv_power"]
+        plant_flow_values = _flow_values(flow)
+        known_pv = sum(
+            normalized["inverters"][serial]["values"]["pv_power"]
+            for serial in pv_aggregation["contributing_inverters"]
+        )
+        sanity = plant_pv_sanity(plant_flow_values, known_pv)
+        pv_aggregation["plant_flow_sanity"] = sanity
+        if normalized["plant"]["values"]["pv_power"] is None:
+            if sanity["accepted"]:
+                candidate = plant_flow_values["pv_power"]
+                self._last_valid_plant_pv = (candidate, now)
+                normalized["plant"]["values"]["pv_power"] = candidate
+                pv_aggregation.update({
+                    "aggregation_method": "validated_plant_flow",
+                    "sample_age_seconds": 0.0,
+                })
+            elif self._last_valid_plant_pv is not None:
+                previous, accepted_at = self._last_valid_plant_pv
+                age = now - accepted_at
+                if timedelta(0) <= age <= PLANT_PV_HOLD_INTERVAL:
+                    normalized["plant"]["values"]["pv_power"] = previous
+                    pv_aggregation.update({
+                        "aggregation_method": "held_validated_plant_flow",
+                        "sample_age_seconds": age.total_seconds(),
+                    })
+        else:
+            # A later missing-inverter poll must not revive an old plant fallback
+            # after the integration has switched back to complete inverter sums.
+            self._last_valid_plant_pv = None
 
         normalized["debug_diagnostics"]["pv_comparison"] = {
             "plant_realtime_today": _number(realtime.get("etoday")),

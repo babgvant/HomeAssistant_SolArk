@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 from datetime import datetime
+from math import isfinite
 
 INVERTER_PARAMETER_IDS = (16,17,18,19,20,21,23,24,25,26,27,28,29,30,31,34,35,44,45,46,60,67,68,70,71,73,75,76,77,78,79,80,81,82,83,84,85,86,91,92,93,94,96,97,98,101,102,103,104,209,210,465,466,467,596,597,598,599,600,601,602,603,604,607,608,609,610,611)
 
@@ -139,6 +140,41 @@ def balance(
         "sink": sink,
         "error": source - sink,
     }
+
+
+def plant_pv_sanity(
+    values: dict[str, Any], partial_inverter_power: float = 0.0
+) -> dict[str, Any]:
+    """Check a plant PV fallback against the rest of the same flow snapshot.
+
+    This is a consistency check, not proof of complete inverter coverage. Avoid
+    generator/Smart Load modes whose flow accounting is not established here.
+    """
+    keys = (
+        "pv_power", "grid_import_power", "battery_discharge_power",
+        "load_power", "grid_export_power", "battery_charge_power",
+    )
+    result: dict[str, Any] = {"accepted": False}
+    numeric = {key: number(values.get(key)) for key in keys}
+    if any(value is None or not isfinite(value) or value < 0 for value in numeric.values()):
+        return {**result, "reason": "missing_or_invalid_power"}
+    for key in ("generator_power", "smart_load_power"):
+        value = number(values.get(key))
+        if value is not None and (not isfinite(value) or value != 0):
+            return {**result, "reason": "unsupported_auxiliary_flow"}
+    if values.get("generator_on"):
+        return {**result, "reason": "unsupported_auxiliary_flow"}
+    power_balance = balance(numeric, keys[:3], keys[3:])
+    tolerance = max(500.0, 0.05 * max(power_balance["source"], power_balance["sink"]))
+    result.update({
+        "power_balance_error": power_balance["error"],
+        "tolerance_watts": tolerance,
+    })
+    if abs(power_balance["error"]) > tolerance:
+        return {**result, "reason": "power_balance_mismatch"}
+    if numeric["pv_power"] + tolerance < partial_inverter_power:
+        return {**result, "reason": "below_known_inverter_power"}
+    return {**result, "accepted": True, "reason": "balanced_plant_flow"}
 
 
 def merge_inverter_topology(

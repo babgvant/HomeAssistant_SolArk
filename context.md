@@ -7,7 +7,12 @@ needed for normal installation or operation.
 
 Whole-site PV power and PV counters use completeness-checked per-inverter sums.
 Plant flow supplies load, grid and battery power and their direction flags. Missing
-PV contributors produce unavailable, never a potentially partial plant PV fallback.
+PV energy contributors produce unavailable. Missing PV power contributors permit
+a plant-flow fallback only after a finite/nonnegative power balance check (500 W
+or 5% tolerance), no active auxiliary flow, and a check against known inverter power.
+Rejected fallback samples hold the previous accepted plant value for at most two
+minutes with an explicit age, then become unavailable. This cannot prove coverage
+of a consistently partial cloud snapshot.
 
 The analyzed parallel installation demonstrated that instantaneous inverter powers
 could match the plant aggregate while lifetime inverter counters did not necessarily

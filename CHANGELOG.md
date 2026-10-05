@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- Allow plant PV power fallback after a power-balance sanity check when inverter
+  totals are incomplete. Expose validation and age; hold rejected plant samples
+  for at most two minutes. Complete inverter sums remain preferred.
+
 - Fix options-flow startup on Home Assistant 2025.12 and later by using the
   framework-provided read-only config entry property.
 

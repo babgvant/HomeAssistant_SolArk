@@ -102,6 +102,38 @@ class BalanceTests(unittest.TestCase):
         self.assertIsNone(models.balance({"pv": 1}, ("pv",), ("load",)))
 
 
+class PlantPVSanityTests(unittest.TestCase):
+    def values(self, pv=10000, load=10000):
+        return {"pv_power": pv, "load_power": load, "grid_import_power": 0,
+                "grid_export_power": 0, "battery_charge_power": 0,
+                "battery_discharge_power": 0}
+
+    def test_balance_tolerance_and_known_inverter_lower_bound(self):
+        self.assertTrue(models.plant_pv_sanity(self.values(9500, 10000))["accepted"])
+        self.assertFalse(models.plant_pv_sanity(self.values(9499, 10000))["accepted"])
+        self.assertTrue(models.plant_pv_sanity(self.values(20000, 21000))["accepted"])
+        self.assertEqual(models.plant_pv_sanity(self.values(), 15000)["reason"],
+                         "below_known_inverter_power")
+
+    def test_nonfinite_negative_and_missing_inputs_are_rejected(self):
+        for key in self.values():
+            for value in (None, float("nan"), float("inf"), -1):
+                with self.subTest(key=key, value=value):
+                    values = self.values()
+                    values[key] = value
+                    self.assertFalse(models.plant_pv_sanity(values)["accepted"])
+
+    def test_auxiliary_flow_is_not_mistaken_for_pv(self):
+        for extra in ({"generator_power": 1000}, {"generator_on": True},
+                      {"smart_load_power": 1000}):
+            self.assertEqual(models.plant_pv_sanity({**self.values(), **extra})["reason"],
+                             "unsupported_auxiliary_flow")
+
+    def test_zero_and_real_power_decreases_are_valid(self):
+        for power in (10000, 2000, 0):
+            self.assertTrue(models.plant_pv_sanity(self.values(power, power))["accepted"])
+
+
 class ParallelAggregationTests(unittest.TestCase):
     INVERTERS = {
         "M-2511209953": {"values": {"pv_power": 4000, "pv_energy_today": 5.8, "pv_energy": 499.6}},
