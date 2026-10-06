@@ -14,12 +14,17 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .api import SolArkCloudAPI, SolArkCloudAPIError, SolArkCloudAuthenticationError
 from .const import CONF_PLANT_ID, CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
 from .capture import PowerCapture
-from .models import INVERTER_PARAMETER_IDS, PARAMETER_KEYS, balance, battery_values, complete_inverter_sum, flow_values, merge_inverter_topology, number, plant_pv_sanity
+from .models import INVERTER_PARAMETER_IDS, PARAMETER_KEYS, balance, battery_values, complete_inverter_sum, flow_values, merge_inverter_topology, number, plant_pv_sanity, site_flow_coverage
 
 _LOGGER = logging.getLogger(__name__)
 METADATA_INTERVAL = timedelta(minutes=30)
 INVERTER_DETAIL_INTERVAL = timedelta(minutes=5)
 PLANT_PV_HOLD_INTERVAL = timedelta(minutes=2)
+SITE_POWER_KEYS = (
+    "pv_power", "load_power", "grid_power", "grid_import_power", "grid_export_power",
+    "battery_power", "battery_charge_power", "battery_discharge_power",
+    "generator_power", "smart_load_power",
+)
 _number = number
 _flow_values = flow_values
 _battery_values = battery_values
@@ -44,6 +49,7 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._inverter_details: dict[str, tuple[Any, Any, Any]] = {}
         self._inverter_details_at: datetime | None = None
         self._last_valid_plant_pv: tuple[float, datetime] | None = None
+        self._last_complete_site_flow: tuple[dict[str, Any], datetime] | None = None
         interval = int(entry.options.get(CONF_SCAN_INTERVAL, entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)))
         super().__init__(
             hass,
@@ -382,6 +388,12 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             for serial in pv_aggregation["contributing_inverters"]
         )
         sanity = plant_pv_sanity(plant_flow_values, known_pv)
+        coverage = site_flow_coverage(flow, realtime, inverter_raw) if all(
+            str(item["sn"]) in fresh_inverter_serials for item in inverter_raw
+        ) else {"status": "unverified", "reason": "stale_inverter_list"}
+        normalized["debug_diagnostics"]["site_flow_coverage"] = coverage
+        if coverage["status"] == "partial":
+            sanity = {**sanity, "accepted": False, "reason": "staggered_upload_subtotal"}
         pv_aggregation["plant_flow_sanity"] = sanity
         if normalized["plant"]["values"]["pv_power"] is None:
             if sanity["accepted"]:
@@ -426,6 +438,26 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "expected_inverters": len(normalized["inverters"]),
             }
 
+        if coverage["status"] == "complete" and sanity["accepted"]:
+            self._last_complete_site_flow = (dict(plant_flow_values), now)
+        elif coverage["status"] == "partial":
+            held_values, age_seconds = {}, None
+            if self._last_complete_site_flow is not None:
+                previous_values, accepted_at = self._last_complete_site_flow
+                age = now - accepted_at
+                if timedelta(0) <= age <= PLANT_PV_HOLD_INTERVAL:
+                    held_values, age_seconds = previous_values, age.total_seconds()
+            method = "held_complete_site_flow" if held_values else "rejected_partial_site_flow"
+            for key in SITE_POWER_KEYS:
+                # Independently complete inverter PV remains usable.
+                if key == "pv_power" and pv_aggregation["aggregation_method"] == "sum_per_inverter":
+                    continue
+                normalized["plant"]["values"][key] = held_values.get(key)
+                aggregation.setdefault(key, {}).update({
+                    "aggregation_method": method, "sample_age_seconds": age_seconds,
+                    "rejection_reason": coverage["reason"],
+                })
+
         plant_power = normalized["plant"]["values"]
         balance_keys = (
             "pv_power", "grid_import_power", "battery_discharge_power",
@@ -433,7 +465,7 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         # The plant flow contains a coherent site snapshot even when optional
         # per-inverter flow endpoints return empty objects.
-        plant_flow_power = {**plant_power, "pv_power": _flow_values(flow).get("pv_power")}
+        plant_flow_power = plant_flow_values
         power_balance = balance(plant_flow_power, balance_keys[:3], balance_keys[3:])
         if power_balance is not None:
             normalized["energy_balance"] = {

@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### 5.1.2
+
+- Reject staggered cloud uploads whose plant power matches only the newly updated
+  inverter subset. Protect solar, battery, grid, and load together, holding the last
+  verified complete site flow for at most two minutes before becoming unavailable.
+- Keep raw power balance and upload-coverage evidence in diagnostics while values
+  are held. Preserve independently complete inverter PV sums and genuine zeros.
+
 - Allow plant PV power fallback after a power-balance sanity check when inverter
   totals are incomplete. Expose validation and age; hold rejected plant samples
   for at most two minutes. Complete inverter sums remain preferred.

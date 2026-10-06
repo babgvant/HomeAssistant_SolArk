@@ -190,3 +190,50 @@ def merge_inverter_topology(
         if isinstance(item, dict) and item.get("sn"):
             by_serial[str(item["sn"])] = item
     return list(by_serial.values())
+
+
+def site_flow_coverage(flow: dict[str, Any], realtime: dict[str, Any], summaries: list[dict[str, Any]]) -> dict[str, Any]:
+    """Detect the observed staggered-upload subtotal, without using AC power as PV.
+
+    Compare like-for-like summary/realtime pac values. Only apply the result to
+    flow when its PV also matches that realtime snapshot and no auxiliary flow
+    is active. Unknown conventions or timestamps leave coverage unverified.
+    """
+    unknown = {"status": "unverified", "reason": "insufficient_comparable_data"}
+    if len(summaries) < 2:
+        return unknown
+    values = flow_values(flow)
+    if values.get("generator_on") or any(
+        values.get(key) not in (None, 0) for key in ("generator_power", "smart_load_power")
+    ):
+        return unknown
+    pac, pv = number(realtime.get("pac")), values.get("pv_power")
+    if any(value is None or not isfinite(value) or value < 0 for value in (pac, pv)):
+        return unknown
+    # Cloud subtotal arithmetic is exact in the capture; allow only rounding.
+    tolerance = max(10.0, pac * 0.001)
+    if abs(pac - pv) > tolerance:
+        return unknown
+    try:
+        plant_time = datetime.fromisoformat(str(realtime.get("updateAt")).replace("Z", "+00:00"))
+        times = [datetime.fromisoformat(str(item.get("updateAt")).replace("Z", "+00:00")) for item in summaries]
+        if plant_time.utcoffset() is None or any(t.utcoffset() is None for t in times):
+            return unknown
+        newest = max(times)
+    except (ValueError, TypeError):
+        return unknown
+    powers = [number(item.get("pac")) for item in summaries]
+    if any(power is None or not isfinite(power) or power < 0 for power in powers):
+        return unknown
+    recent = [(newest - t).total_seconds() <= 60 for t in times]
+    total = sum(powers)
+    recent_total = sum(power for power, current in zip(powers, recent) if current)
+    result = {"inverter_power_sum": total, "recent_inverter_power_sum": recent_total,
+              "recent_inverter_count": sum(recent), "expected_inverter_count": len(summaries)}
+    if all(recent) and abs(pac - total) <= tolerance:
+        return {**result, "status": "complete", "reason": "matching_complete_upload"}
+    if abs((plant_time - newest).total_seconds()) > 60:
+        return {**result, **unknown}
+    if not all(recent) and total - recent_total >= 500 and abs(pac - recent_total) <= tolerance:
+        return {**result, "status": "partial", "reason": "staggered_upload_subtotal"}
+    return {**result, **unknown}

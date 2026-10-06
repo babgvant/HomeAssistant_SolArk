@@ -14,6 +14,16 @@ Rejected fallback samples hold the previous accepted plant value for at most two
 minutes with an explicit age, then become unavailable. This cannot prove coverage
 of a consistently partial cloud snapshot.
 
+Plant flow also has a staggered-upload guard: compare plant realtime `pac` with
+inverter-summary `pac` using a 10 W or 0.1% rounding allowance. When flow PV matches
+that snapshot, the plant timestamp is within 60 seconds of the newest inverter,
+and plant power equals the subset updated within 60 seconds of that inverter while
+omitting at least 500 W from older contributors, reject all site flow power fields.
+Hold the last balanced flow with a verified complete summary sum for at most two
+minutes, then become unavailable. Complete per-inverter PV is still independent.
+Missing timestamps, different AC/PV conventions, active auxiliary flow, or an
+unrelated mismatch leave coverage unverified; they do not activate this guard.
+
 The analyzed parallel installation demonstrated that instantaneous inverter powers
 could match the plant aggregate while lifetime inverter counters did not necessarily
 match the plant lifetime counter. Equipment replacement, reset epochs, and cloud-side

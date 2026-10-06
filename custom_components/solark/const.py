@@ -1,5 +1,5 @@
 DOMAIN = "solark"
-INTEGRATION_VERSION = "5.1.1"
+INTEGRATION_VERSION = "5.1.2"
 
 CONF_USERNAME = "username"
 CONF_PASSWORD = "password"

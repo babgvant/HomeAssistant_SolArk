@@ -134,6 +134,38 @@ class PlantPVSanityTests(unittest.TestCase):
             self.assertTrue(models.plant_pv_sanity(self.values(power, power))["accepted"])
 
 
+class SiteCoverageTests(unittest.TestCase):
+    def test_staggered_subtotal_and_complete_recovery(self):
+        summaries = [{"pac": 4000, "updateAt": "2026-10-06T17:06:54Z"},
+                     {"pac": 5000, "updateAt": "2026-10-06T17:02:00Z"},
+                     {"pac": 6000, "updateAt": "2026-10-06T17:02:07Z"}]
+        flow, realtime = {"pvPower": 4000}, {"pac": 4000, "updateAt": "2026-10-06T17:06:54Z"}
+        self.assertEqual(models.site_flow_coverage(flow, realtime, summaries)["status"], "partial")
+        summaries[1]["updateAt"] = "2026-10-06T17:07:00Z"
+        flow["pvPower"] = realtime["pac"] = 9000
+        realtime["updateAt"] = "2026-10-06T17:07:00Z"
+        self.assertEqual(models.site_flow_coverage(flow, realtime, summaries)["status"], "partial")
+        summaries[2]["updateAt"] = "2026-10-06T17:07:07Z"
+        flow["pvPower"] = realtime["pac"] = 15000
+        self.assertEqual(models.site_flow_coverage(flow, realtime, summaries)["status"], "complete")
+        # A genuine decrease, including zero, changes all contributors together.
+        for value in (1000, 0):
+            for summary in summaries:
+                summary["pac"] = value
+            flow["pvPower"] = realtime["pac"] = value * 3
+            self.assertEqual(models.site_flow_coverage(flow, realtime, summaries)["status"], "complete")
+
+    def test_unknown_conventions_and_times_do_not_reject(self):
+        summaries = [{"pac": 4000, "updateAt": "2026-10-06T17:06:54Z"},
+                     {"pac": 6000, "updateAt": "2026-10-06T17:02:07Z"}]
+        realtime = {"pac": 4000, "updateAt": "2026-10-06T17:06:54Z"}
+        for flow in ({"pvPower": 5000}, {"pvPower": 4000, "genPower": 1000},
+                     {"pvPower": 4000, "minPower": 500}, {"pvPower": float("nan")}):
+            self.assertEqual(models.site_flow_coverage(flow, realtime, summaries)["status"], "unverified")
+        for timestamp in (None, "invalid", "2026-10-06T17:02:07", "2026-10-06T16:00:00Z"):
+            self.assertEqual(models.site_flow_coverage({"pvPower": 4000}, {**realtime, "updateAt": timestamp}, summaries)["status"], "unverified")
+
+
 class ParallelAggregationTests(unittest.TestCase):
     INVERTERS = {
         "M-2511209953": {"values": {"pv_power": 4000, "pv_energy_today": 5.8, "pv_energy": 499.6}},

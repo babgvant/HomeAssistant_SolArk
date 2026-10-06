@@ -197,6 +197,76 @@ class CoordinatorDiagnosticsTests(unittest.TestCase):
         self.assertIsNone(result["plant"]["values"]["pv_power"])
         self.assertEqual(result["aggregation"]["pv_power"]["plant_flow_sanity"]["reason"], "power_balance_mismatch")
 
+    def test_partial_upload_holds_all_site_power_then_expires_and_recovers(self):
+        module = load_coordinator()
+        api = FakeAPI()
+        api.summaries = [{"sn": str(i), "id": i, "pac": power, "updateAt": timestamp}
+                         for i, power, timestamp in (
+                             (1, 3726, "2026-10-06T17:01:54Z"),
+                             (2, 5195, "2026-10-06T17:02:00Z"),
+                             (3, 5874, "2026-10-06T17:02:07Z"))]
+        snapshot = {"pvPower": 14795, "battPower": 12800, "toBat": True,
+                    "gridOrMeterPower": 170, "gridTo": True, "loadOrEpsPower": 2165}
+        realtime = {"pac": 14795, "updateAt": "2026-10-06T17:02:07Z"}
+        async def flow(): return dict(snapshot)
+        async def rt(): return dict(realtime)
+        api.async_get_plant_flow, api.async_get_plant_realtime = flow, rt
+        entry = types.SimpleNamespace(data={"plant_id": "site"}, options={"diagnostic_capture": True}, title="Site")
+        coordinator = module.SolArkDataUpdateCoordinator(None, entry, api)
+        full = asyncio.run(coordinator._async_update_data())
+        accepted_at = coordinator._last_complete_site_flow[1]
+        # Sanitized arithmetic from the captured one-inverter upload: balanced
+        # enough to pass the old PV-only guard, yet two contributors are absent.
+        api.summaries[0]["updateAt"] = "2026-10-06T17:06:54Z"
+        realtime.update(pac=3726, updateAt="2026-10-06T17:06:54Z")
+        snapshot.update(pvPower=3726, battPower=141, loadOrEpsPower=950,
+                        gridOrMeterPower=2190, gridTo=False, toGrid=True)
+        held = asyncio.run(coordinator._async_update_data())
+        for key in module.SITE_POWER_KEYS:
+            self.assertEqual(held["plant"]["values"][key], full["plant"]["values"][key])
+            self.assertEqual(held["aggregation"][key]["aggregation_method"], "held_complete_site_flow")
+        self.assertEqual(coordinator._last_complete_site_flow[1], accepted_at)
+        self.assertEqual(held["energy_balance"]["pv_power"], 3726)
+        self.assertEqual(held["energy_balance"]["battery_charge_power"], 141)
+        exported = coordinator.power_capture.export()
+        self.assertEqual(exported["rolling_samples"][-1]["plant_flow_powers"]["pv_power"], 3726)
+        self.assertEqual(exported["rolling_samples"][-1]["endpoint_measurements"]["site_flow_coverage"]["status"], "partial")
+        coordinator._last_complete_site_flow = (coordinator._last_complete_site_flow[0], accepted_at - timedelta(seconds=121))
+        expired = asyncio.run(coordinator._async_update_data())
+        for key in module.SITE_POWER_KEYS:
+            self.assertIsNone(expired["plant"]["values"][key])
+        # Initial partial upload also cannot manufacture a complete value.
+        initial = asyncio.run(module.SolArkDataUpdateCoordinator(None, entry, api)._async_update_data())
+        self.assertIsNone(initial["plant"]["values"]["pv_power"])
+        for summary in api.summaries:
+            summary.update(pac=0, updateAt="2026-10-06T17:07:07Z")
+        realtime.update(pac=0, updateAt="2026-10-06T17:07:07Z")
+        snapshot.update(pvPower=0, battPower=0, loadOrEpsPower=0, gridOrMeterPower=0)
+        recovered = asyncio.run(coordinator._async_update_data())
+        self.assertEqual(recovered["plant"]["values"]["pv_power"], 0)
+        self.assertEqual(recovered["plant"]["values"]["battery_power"], 0)
+        self.assertEqual(recovered["aggregation"]["pv_power"]["aggregation_method"], "validated_plant_flow")
+
+    def test_complete_inverter_pv_survives_partial_plant_upload(self):
+        module = load_coordinator()
+        api = FakeAPI()
+        api.summaries = [
+            {"sn": "one", "id": 1, "pac": 4000, "updateAt": "2026-10-06T17:06:54Z"},
+            {"sn": "two", "id": 2, "pac": 6000, "updateAt": "2026-10-06T17:02:07Z"},
+        ]
+        async def flow():
+            return {"pvPower": 4000, "battPower": 3000, "toBat": True,
+                    "gridOrMeterPower": 0, "loadOrEpsPower": 1000}
+        async def rt(): return {"pac": 4000, "updateAt": "2026-10-06T17:06:54Z"}
+        async def inverter_flow(inverter_id): return {"pvPower": {1: 4000, 2: 6000}[inverter_id]}
+        api.async_get_plant_flow, api.async_get_plant_realtime = flow, rt
+        api.async_get_inverter_flow = inverter_flow
+        entry = types.SimpleNamespace(data={"plant_id": "site"}, options={}, title="Site")
+        result = asyncio.run(module.SolArkDataUpdateCoordinator(None, entry, api)._async_update_data())
+        self.assertEqual(result["plant"]["values"]["pv_power"], 10000)
+        self.assertEqual(result["aggregation"]["pv_power"]["aggregation_method"], "sum_per_inverter")
+        self.assertIsNone(result["plant"]["values"]["battery_power"])
+
 
 if __name__ == "__main__":
     unittest.main()

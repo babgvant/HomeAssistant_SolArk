@@ -1,5 +1,37 @@
 # Power dip investigation — October 5, 2026
 
+## October 6 capture and 5.1.2 correction
+
+The supplied 5.1.1 event export contains 223 unique retained polls, with capture
+enabled. Eleven polls exhibit a staggered-upload subtotal: plant flow PV and
+plant realtime power equal only one or two newly updated inverter summary powers,
+while the other contributors retain timestamps from the previous five-minute
+upload. The following poll restores complete coverage. For example, at 12:06:56
+America/Chicago, plant PV is 3,726 W with summary powers 3,726, 5,195, and 5,874 W;
+only the first inverter has the new upload timestamp. At 12:07:27 the total is
+14,823 W and all three upload timestamps are aligned again. Battery, load, and
+grid also change in these partial snapshots. A balanced subtotal at 12:06:56
+passes the old PV-only sanity check; later imbalanced subtotals hold PV alone.
+The capture supports a cloud aggregation/upload transition, not a physical dip.
+It does not establish the cloud service's internal cause.
+
+Version 5.1.2 compares like-for-like plant and inverter-summary `pac` values and
+checks timestamp grouping. It applies the guard only when flow PV matches plant
+realtime power and auxiliary flow is inactive. It does not substitute AC summary
+power for PV or reconstruct battery/grid/load by scaling. A matching partial
+upload rejects all site flow power, holding the last balanced complete upload
+for up to two minutes; with no baseline or an expired baseline values become
+unavailable. Complete inverter PV sums remain usable. Unverifiable coverage does
+not trigger rejection. Raw flow balance and coverage evidence remain available
+in diagnostics. All eleven captured subtotal polls are detected in offline replay.
+
+Deploy the complete `custom_components/solark` directory and restart Home Assistant.
+Verify diagnostics report version 5.1.2. This change prevents future rejected
+subtotals from being recorded; existing History dips remain. Production behavior
+still needs verification after installation.
+
+The sections below describe the earlier investigation and deployment state.
+
 ## Evidence and limits
 
 The clean checkout was dd80221, version 5.1.0. No connection to running Home
