@@ -12,7 +12,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpda
 
 from .api import SolArkCloudAPIError, SolArkCloudAuthenticationError
 from .const import DOMAIN
-from .tou import is_master, modbus_position
+from .tou import BATTERY_CONTROL_FIELDS, battery_form_payload, is_master, modbus_position
 
 
 class SolArkTOUCoordinator(DataUpdateCoordinator):
@@ -89,6 +89,11 @@ class SolArkTOUEntity(CoordinatorEntity):
 
     @property
     def available(self):
+        if self.key in BATTERY_CONTROL_FIELDS:
+            try:
+                battery_form_payload(self.serial, (self.coordinator.data or {}).get(self.serial, {}))
+            except ValueError:
+                return False
         return (super().available and self.serial in self.coordinator.master_inverters
                 and self.setting is not None)
 

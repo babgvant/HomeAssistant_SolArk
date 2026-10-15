@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta
 import logging
+from math import isfinite
 import re
 from time import monotonic
 from typing import Any, Dict, Iterable, Optional
@@ -12,7 +13,8 @@ from zoneinfo import ZoneInfo
 import aiohttp
 
 from .models import latest_parameter_values, latest_parameter_times
-from .tou import form_payload, is_master, validate_changes
+from .tou import (BATTERY_CONTROL_FIELDS, BOOLEAN_FIELDS, battery_form_payload,
+                  form_payload, is_master, validate_changes)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -423,7 +425,8 @@ class SolArkCloudAPI:
         pending = self._pending_tou.get(serial)
         if pending:
             submitted_at, changes = pending
-            if all(str(settings.get(key)) == value for key, value in changes.items()) or monotonic() - submitted_at >= 120:
+            if all((str(int(settings[key] in (True, 1, "1"))) if key in BOOLEAN_FIELDS
+                    else str(settings.get(key))) == value for key, value in changes.items()) or monotonic() - submitted_at >= 120:
                 self._pending_tou.pop(serial, None)
             else:
                 settings = {**settings, **changes}
@@ -441,8 +444,19 @@ class SolArkCloudAPI:
                 self._pending_tou.pop(serial, None)
                 raise SolArkCloudAPIError("TOU writes require Modbus position 1")
             settings.update(validated)
+            if set(validated) & BATTERY_CONTROL_FIELDS:
+                if "sdBatteryCurrent" in validated:
+                    try:
+                        limit = float(settings["batteryMaxCurrentCharge"])
+                    except (KeyError, TypeError, ValueError) as err:
+                        raise ValueError("Battery charge current limit unavailable") from err
+                    if not isfinite(limit) or not 0 <= float(validated["sdBatteryCurrent"]) <= limit:
+                        raise ValueError("Grid charge current exceeds battery charge limit")
+                payload = battery_form_payload(serial, settings)
+            else:
+                payload = form_payload(serial, settings)
             response = await self._request(
-                "POST", f"/api/v1/common/setting/{serial}/set", form_payload(serial, settings)
+                "POST", f"/api/v1/common/setting/{serial}/set", payload
             )
             if not isinstance(response, dict) or response.get("success") is not True or response.get("code") not in (0, "0"):
                 raise SolArkCloudAPIError("TOU settings update was not accepted")

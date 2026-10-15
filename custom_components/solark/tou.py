@@ -20,6 +20,33 @@ TOU_FORM_FIELDS = (
 )
 BOOLEAN_FIELDS = {key for key in TOU_FORM_FIELDS if key.endswith(("On", "on"))}
 
+# Battery tab is a separate complete form. Do not merge it into the TOU form.
+# The portal also sent sdStartVol="undefined"; that is a UI artifact, not a setting.
+BATTERY_FORM_FIELDS = (
+    "safetyType", "battMode", "batteryCap", "batteryMaxCurrentCharge",
+    "batteryMaxCurrentDischarge", "batteryEmptyV", "batteryImpedance",
+    "batteryEfficiency", "batteryShutdownCap", "batteryLowCap", "batteryRestartCap",
+    "batteryShutdownVolt", "batteryLowVolt", "batteryRestartVolt", "batteryOn",
+    "floatVolt", "lithiumMode", "sdChargeOn", "sdStartCap", "sdBatteryCurrent",
+    "genChargeOn", "gridSignal", "generatorStartVolt", "generatorStartCap",
+    "generatorBatteryCurrent", "equChargeCycle", "equChargeTime", "absorptionVolt",
+    "equVoltCharge", "tempco", "genSignal", "sdStartVolt", "generatorForcedStart",
+    "bmsErrStop", "signalIslandModeEnable", "lowPowerMode", "disableFloatCharge",
+    "lowNoiseMode",
+)
+BATTERY_CONTROL_FIELDS = {"sdChargeOn", "sdStartCap", "sdBatteryCurrent"}
+
+
+def battery_form_payload(serial: str, settings: dict[str, Any]) -> dict[str, str]:
+    """Preserve the captured battery form without inventing missing defaults."""
+    payload = {"sn": serial}
+    for key in BATTERY_FORM_FIELDS:
+        value = settings.get(key)
+        if not isinstance(value, (str, int, float)) or isinstance(value, bool):
+            raise ValueError("Incomplete or invalid battery settings form")
+        payload[key] = str(value)
+    return payload
+
 
 def modbus_position(settings: dict[str, Any]) -> int | None:
     """Return a valid portal Modbus position (1–16), excluding missing values."""
@@ -58,7 +85,11 @@ def validate_changes(changes: dict[str, Any]) -> dict[str, str]:
         raise ValueError("No TOU changes supplied")
     result = {}
     for key, value in changes.items():
-        if re.fullmatch(r"cap[1-6]", key):
+        if re.fullmatch(r"time[1-6]on", key) or key == "sdChargeOn":
+            if value not in (True, False, 0, 1, "0", "1"):
+                raise ValueError("Grid charge enable must be boolean")
+            result[key] = "1" if value in (True, 1, "1") else "0"
+        elif re.fullmatch(r"cap[1-6]", key) or key == "sdStartCap":
             if isinstance(value, bool):
                 raise ValueError("SOC must be an integer from 0 to 100")
             try:
@@ -68,6 +99,16 @@ def validate_changes(changes: dict[str, Any]) -> dict[str, str]:
             if not 0 <= numeric <= 100 or not numeric.is_integer():
                 raise ValueError("SOC must be an integer from 0 to 100")
             result[key] = str(int(numeric))
+        elif key == "sdBatteryCurrent":
+            if isinstance(value, bool):
+                raise ValueError("Grid charge current must be a nonnegative integer")
+            try:
+                numeric = float(value)
+            except (ValueError, TypeError) as err:
+                raise ValueError("Invalid grid charge current") from err
+            if not 0 <= numeric or not numeric.is_integer():
+                raise ValueError("Grid charge current must be a nonnegative integer")
+            result[key] = str(int(numeric))
         elif re.fullmatch(r"sellTime[1-6]", key):
             if not isinstance(value, str) or not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", value):
                 raise ValueError("TOU time must use HH:MM in inverter local time")
@@ -76,4 +117,6 @@ def validate_changes(changes: dict[str, Any]) -> dict[str, str]:
             result[key] = str(value)
         else:
             raise ValueError("Unsupported TOU setting")
+    if set(result) & BATTERY_CONTROL_FIELDS and set(result) - BATTERY_CONTROL_FIELDS:
+        raise ValueError("Battery and TOU settings require separate form writes")
     return result

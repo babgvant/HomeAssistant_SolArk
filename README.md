@@ -12,7 +12,8 @@ inverters, batteries, and the Home Assistant Energy Dashboard.
 - Device details including model, serial number, firmware, and connection status
 - Automatic API discovery and credential reauthentication
 - Downloadable, privacy-safe diagnostics
-- Master-inverter TOU battery SOC targets, start times, and schedule enable control
+- Master-inverter TOU targets, start times, grid-charge permissions, start SOC,
+  and current controls for energy-cost automations
 
 ## Installation
 
@@ -107,16 +108,28 @@ in inverter settings: position **1** is the master, and positions **2+** are
 secondary inverters. No manual serial selection is needed. Device names and API
 list order do not affect master detection.
 
-Only the detected master has six **TOU battery SOC** number entities (0–100%),
-six **TOU start time** entities, and a **Time of use** switch under its configuration
-controls. Times use the inverter's local clock with minute precision. Controls are
+Only the detected master has these configuration controls:
+
+| Control | Purpose |
+|---|---|
+| TOU 1–6 battery SOC | Battery target for each period (0–100%) |
+| TOU 1–6 start time | Period start in the inverter's local clock |
+| Time of use | Enable the TOU schedule |
+| TOU 1–6 grid charging | Allow grid charging in each period |
+| Grid charging | Battery-settings permission to charge from the grid |
+| Grid charge start SOC | SOC threshold that triggers grid charging (0–100%) |
+| Grid charge current | DC battery charge limit in integer amps, up to the current battery charge limit |
+
+Times have minute precision. Controls are
 unavailable when the account or inverter cannot return a complete settings form.
 Settings refresh every minute, independently of telemetry.
 
-Each edit reads the current settings and submits the portal's complete work-mode
-form, preserving power limits, voltage targets, charging flags, active weekdays,
-and other work-mode values. Those additional fields are preserved, not exposed as
-editable controls. Writes target only the detected master. Secondary inverters
+Each edit reads the current settings and submits the corresponding captured portal
+form: work-mode for TOU edits, battery settings for grid-charge permission, start
+SOC, and current. Other fields in that form are preserved, including generator
+settings, battery limits, voltage targets, and active weekdays. Battery controls
+are unavailable if the full battery form is missing; TOU controls remain usable.
+Writes target only the detected master. Secondary inverters
 inherit the master's settings; the integration never sends TOU writes to them.
 If settings cannot be read for every discovered inverter, or no unique position-1
 master is found, TOU writes are disabled until detection succeeds. The master
@@ -127,6 +140,31 @@ A successful command means the cloud accepted the update for delivery. Submitted
 values are shown for up to two minutes while waiting for cloud readback; if they
 are not confirmed, controls revert to the values returned by the cloud. Avoid
 simultaneous edits in the portal while automations are updating TOU settings.
+
+### Using the controls for predictive charging
+
+With TOU enabled, **both Grid charging and the active period's TOU grid charging
+switch must be on**. These permissions do not force immediate charging. The
+battery-settings start SOC triggers charging; the active period's battery SOC is
+the charging target. For example, start SOC 40% and a TOU target of 80% permit
+charging when SOC reaches 40%, toward 80%. SOC of 60% alone does not meet that
+start condition. Keep the start threshold below the charging target. See the
+[Sol-Ark programming guide, pages 11–12](https://www.sol-ark.com/wp-content/uploads/2024/08/Inverter-Programming-Guide-V2.0-3-2.pdf).
+
+Home Assistant automations can combine tariff windows, solar forecasts, battery
+SOC, and expected consumption to choose the six periods and their targets. Use
+`number.set_value`, `time.set_value`, and `switch.turn_on`/`switch.turn_off` with
+the actual entity IDs on the master inverter. Configure the current limit, start
+threshold, times, and targets first, then enable the intended charging period and
+grid-charge permission. Disabling a period's charge permission does not disable
+the TOU schedule or solar charging.
+
+The integration provides the controls; it does not calculate forecasts or an
+optimal schedule. Avoid rewriting unchanged values every telemetry poll. Allow
+for one-minute settings polling and up to two minutes of pending cloud readback;
+an accepted command is not proof of charging power. Check battery charging and
+grid import telemetry to verify the result. Current is DC amps at the battery,
+not grid AC amps or watts; parallel-system scaling depends on inverter behavior.
 
 ## Main plant sensors
 

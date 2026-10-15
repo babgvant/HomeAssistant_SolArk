@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- Add six TOU grid-charge switches plus battery-level grid-charge permission,
+  start SOC, and DC current controls for predictive energy-cost automations.
+  Preserve the separate captured battery form, enforce the battery current limit,
+  and confirm boolean TOU readback without waiting for the pending timeout.
+
 - Use the Home Assistant timezone for plant-flow and inverter-day API queries,
   preventing wrong-day requests during local evening hours.
 - Serialize concurrent token renewal and keep delayed unauthorized responses

@@ -30,6 +30,7 @@ API, tou = load_api()
 def settings():
     data = {key: 0 for key in tou.TOU_FORM_FIELDS}
     data.update({key: False for key in tou.BOOLEAN_FIELDS})
+    data.update({key: 0 for key in tou.BATTERY_FORM_FIELDS if key not in data})
     data.update({f"sellTime{i}": f"{(i-1)*4:02}:00" for i in range(1, 7)})
     data.update({f"cap{i}": 40 for i in range(1, 7)})
     data.update({f"sellTime{i}Pac": 18000 for i in range(1, 7)})
@@ -37,6 +38,8 @@ def settings():
     data.update({"modbusSn": 1, "peakAndVallery": 1, "cap2": 100, "cap3": 100,
                  "cap4": 80, "pvMaxLimit": 19950, "solarMaxSellPower": 23400,
                  "batteryShutdownVolt": 46, "reset": 0})
+    data.update({"batteryMaxCurrentCharge": 250, "sdBatteryCurrent": 190,
+                 "sdStartCap": 50})
     return data
 
 
@@ -145,7 +148,7 @@ def test_time_and_enable_write_preserves_soc():
 
 
 def test_control_platforms_poll_write_and_handle_unavailable_settings():
-    """Exercise all 13 entity bindings and optional read failure isolation."""
+    """Exercise TOU and battery entity bindings and read failure isolation."""
     from datetime import time
     from types import SimpleNamespace
 
@@ -212,27 +215,50 @@ def test_control_platforms_poll_write_and_handle_unavailable_settings():
         entities = []
         for name in ("number", "time", "switch"):
             await loaded[name].async_setup_entry(hass, entry, entities.extend)
-        assert len(entities) == 13
+        assert len(entities) == 22
+        by_key = {entity.key: entity for entity in entities}
         assert all(entity.serial == "TEST-SERIAL" for entity in entities)
         assert set(coordinator.data) == {"TEST-SERIAL"}
-        assert len({entity._attr_unique_id for entity in entities}) == 13
+        assert len({entity._attr_unique_id for entity in entities}) == 22
         assert all(entity.available for entity in entities)
         assert entities[0]._attr_device_info["identifiers"] == {("solark", "inverter:TEST-SERIAL")}
         await entities[1].async_set_native_value(85)
         assert entities[1].native_value == 85
-        await entities[7].async_set_value(time(8, 30))
-        assert entities[7].native_value == time(8, 30)
-        await entities[-1].async_turn_off()
-        assert entities[-1].is_on is False
-        await entities[-1].async_turn_on()
-        assert entities[-1].is_on is True
-        assert writes[-1]["cap2"] == "85"
+        await by_key['sellTime2'].async_set_value(time(8, 30))
+        assert by_key['sellTime2'].native_value == time(8, 30)
+        await by_key['peakAndVallery'].async_turn_off()
+        assert by_key['peakAndVallery'].is_on is False
+        await by_key['peakAndVallery'].async_turn_on()
+        assert by_key['peakAndVallery'].is_on is True
+        for slot in range(1, 7):
+            entity = by_key[f'time{slot}on']
+            await entity.async_turn_on()
+            assert entity.is_on is True
+            assert writes[-1][f'time{slot}on'] is True
+            await entity.async_turn_off()
+            assert entity.is_on is False
+        assert writes[-1]['cap2'] == '85'
+        await by_key['sdChargeOn'].async_turn_on()
+        assert by_key['sdChargeOn'].is_on is True
+        await by_key['sdStartCap'].async_set_native_value(40)
+        await by_key['sdBatteryCurrent'].async_set_native_value(100)
+        assert by_key['sdBatteryCurrent'].native_max_value == 250
+        assert writes[-1]['sdChargeOn'] == '1'
+        assert writes[-1]['sdStartCap'] == '40'
+        assert writes[-1]['sdBatteryCurrent'] == '100'
         before = len(writes)
         with pytest.raises(modules["homeassistant.exceptions"].HomeAssistantError):
             await coordinator.async_write("SECONDARY", {"cap2": 50})
         assert len(writes) == before
         with pytest.raises(modules["homeassistant.exceptions"].HomeAssistantError):
-            await entities[7].async_set_value(time(8, 30, 15))
+            await by_key['sellTime2'].async_set_value(time(8, 30, 15))
+
+        del cloud['batteryEfficiency']
+        coordinator.data = await coordinator._async_update_data()
+        assert not by_key['sdChargeOn'].available
+        assert not by_key['sdStartCap'].available
+        assert by_key['cap2'].available
+        cloud['batteryEfficiency'] = 99
 
         # No master, duplicate masters, and unknown roles must not pick the first device.
         cloud["modbusSn"] = 2
@@ -254,9 +280,9 @@ def test_control_platforms_poll_write_and_handle_unavailable_settings():
         await loaded["number"].async_setup_entry(hass, entry, late_entities.extend)
         assert late_entities == []
         coordinator.async_set_updated_data(await coordinator._async_update_data())
-        assert len(late_entities) == 6
+        assert len(late_entities) == 8
         coordinator.async_set_updated_data(await coordinator._async_update_data())
-        assert len(late_entities) == 6
+        assert len(late_entities) == 8
 
         secondary["modbusSn"] = None
         assert await coordinator._async_update_data() == {}
@@ -304,3 +330,85 @@ def test_fresh_secondary_position_blocks_write(position):
         asyncio.run(api.async_set_tou_settings("TEST-SERIAL", {"cap2": 50}))
     assert writes == []
     assert api.tou_master_serial is None
+
+
+@pytest.mark.parametrize("changes", [
+    {"time0on": True}, {"time7on": True}, {"time3on": "true"},
+    {"time4on": 2}, {"sdChargeOn": "yes"}, {"sdStartCap": 101},
+    {"sdStartCap": True}, {"sdBatteryCurrent": -1},
+    {"sdBatteryCurrent": 1.5}, {"sdBatteryCurrent": True},
+    {"sdBatteryCurrent": float("nan")}, {"sdBatteryCurrent": float("inf")},
+    {"sdChargeOn": 1, "time4on": True},
+])
+def test_invalid_grid_charge_changes(changes):
+    api, _, writes = api_with_cloud()
+    with pytest.raises(ValueError):
+        asyncio.run(api.async_set_tou_settings("TEST-SERIAL", changes))
+    assert writes == []
+
+
+def test_captured_grid_charge_sequence_and_boolean_readback():
+    async def run():
+        api, cloud, writes = api_with_cloud()
+        cloud["time4on"] = True
+        for changes in ({"time3on": True}, {"time3on": False, "time4on": False},
+                        {"time4on": True}):
+            await api.async_set_tou_settings("TEST-SERIAL", changes)
+        assert [body["time3on"] for body in writes] == [True, False, False]
+        assert [body["time4on"] for body in writes] == [True, False, True]
+        assert all(body["genTime4on"] is False for body in writes)
+        assert all("sdChargeOn" not in body for body in writes)
+        cloud.update({"time3on": False, "time4on": True})
+        await api.async_get_tou_settings("TEST-SERIAL")
+        assert not api._pending_tou
+    asyncio.run(run())
+
+
+def test_battery_form_and_concurrent_tou_edits_are_isolated():
+    async def run():
+        api, cloud, writes = api_with_cloud()
+        await asyncio.gather(
+            api.async_set_tou_settings("TEST-SERIAL", {"sdChargeOn": True}),
+            api.async_set_tou_settings("TEST-SERIAL", {"sdStartCap": 40}),
+            api.async_set_tou_settings("TEST-SERIAL", {"sdBatteryCurrent": 100}),
+            api.async_set_tou_settings("TEST-SERIAL", {"time4on": True}),
+        )
+        body = writes[2]
+        assert set(body) == {"sn", *tou.BATTERY_FORM_FIELDS}
+        assert body["sdChargeOn"] == "1"
+        assert body["sdStartCap"] == "40"
+        assert body["sdBatteryCurrent"] == "100"
+        assert "sdStartVol" not in body
+        for key in tou.BATTERY_FORM_FIELDS:
+            if key not in tou.BATTERY_CONTROL_FIELDS:
+                assert body[key] == str(cloud[key])
+        assert writes[-1]["time4on"] is True
+        assert set(writes[-1]) == {"sn", *tou.TOU_FORM_FIELDS}
+        cloud.update({"sdChargeOn": 1, "sdStartCap": 40, "sdBatteryCurrent": 100,
+                      "time4on": True})
+        await api.async_get_tou_settings("TEST-SERIAL")
+        assert not api._pending_tou
+    asyncio.run(run())
+
+
+def test_battery_write_requires_complete_form_and_current_limit():
+    async def run():
+        api, cloud, writes = api_with_cloud()
+        with pytest.raises(ValueError, match="exceeds"):
+            await api.async_set_tou_settings("TEST-SERIAL", {"sdBatteryCurrent": 251})
+        del cloud["batteryEfficiency"]
+        with pytest.raises(ValueError, match="battery settings form"):
+            await api.async_set_tou_settings("TEST-SERIAL", {"sdChargeOn": True})
+        assert writes == []
+        await api.async_set_tou_settings("TEST-SERIAL", {"cap2": 85})
+        assert writes[0]["cap2"] == "85"
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("changes", [{"sdChargeOn": True}, {"time4on": True}])
+def test_grid_charge_rejects_secondary_writes(changes):
+    api, cloud, writes = api_with_cloud()
+    cloud["modbusSn"] = 2
+    with pytest.raises(API.SolArkCloudAPIError, match="position 1"):
+        asyncio.run(api.async_set_tou_settings("TEST-SERIAL", changes))
+    assert writes == []
