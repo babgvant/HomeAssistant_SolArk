@@ -5,11 +5,13 @@ import asyncio
 from datetime import datetime, timedelta
 import logging
 import re
+from time import monotonic
 from typing import Any, Dict, Iterable, Optional
 
 import aiohttp
 
 from .models import latest_parameter_values, latest_parameter_times
+from .tou import form_payload, is_master, validate_changes
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -92,6 +94,9 @@ class SolArkCloudAPI:
         self.password = password
         self.plant_id = plant_id
         self.parameter_sample_times: dict[str, dict[int, str | None]] = {}
+        self._settings_locks: dict[str, asyncio.Lock] = {}
+        self._pending_tou: dict[str, tuple[float, dict[str, str]]] = {}
+        self.tou_master_serial: str | None = None
 
         self.base_url = base_url.rstrip("/")
         self.api_url = api_url.rstrip("/")
@@ -389,6 +394,46 @@ class SolArkCloudAPI:
     # ------------------------------------------------------------------
     # structured endpoint API
     # ------------------------------------------------------------------
+
+    async def async_get_tou_settings(self, serial: str) -> dict[str, Any]:
+        """Read current settings, retaining accepted edits during cloud propagation."""
+        async with self._settings_locks.setdefault(serial, asyncio.Lock()):
+            return await self._read_tou_settings(serial)
+
+    async def _read_tou_settings(self, serial: str) -> dict[str, Any]:
+        response = await self._request("GET", f"/api/v1/common/setting/{serial}/read")
+        settings = self._response_data(response)
+        # Validate completeness before using the read as the basis for any write.
+        form_payload(serial, settings)
+        pending = self._pending_tou.get(serial)
+        if pending:
+            submitted_at, changes = pending
+            if all(str(settings.get(key)) == value for key, value in changes.items()) or monotonic() - submitted_at >= 120:
+                self._pending_tou.pop(serial, None)
+            else:
+                settings = {**settings, **changes}
+        return settings
+
+    async def async_set_tou_settings(self, serial: str, changes: dict[str, Any]) -> dict[str, Any]:
+        """Read/merge/write the captured form without replaying unrelated registers."""
+        if not self.tou_master_serial or serial != self.tou_master_serial:
+            raise SolArkCloudAPIError("TOU writes require a detected Modbus master")
+        validated = validate_changes(changes)
+        async with self._settings_locks.setdefault(serial, asyncio.Lock()):
+            settings = await self._read_tou_settings(serial)
+            if not is_master(settings):
+                self.tou_master_serial = None
+                self._pending_tou.pop(serial, None)
+                raise SolArkCloudAPIError("TOU writes require Modbus position 1")
+            settings.update(validated)
+            response = await self._request(
+                "POST", f"/api/v1/common/setting/{serial}/set", form_payload(serial, settings)
+            )
+            if not isinstance(response, dict) or response.get("success") is not True or response.get("code") not in (0, "0"):
+                raise SolArkCloudAPIError("TOU settings update was not accepted")
+            previous = self._pending_tou.get(serial, (0, {}))[1]
+            self._pending_tou[serial] = (monotonic(), {**previous, **validated})
+            return settings
 
     @staticmethod
     def _response_data(response: Dict[str, Any]) -> Dict[str, Any]:

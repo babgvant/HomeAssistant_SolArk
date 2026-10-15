@@ -31,7 +31,7 @@ class DiagnosticsPrivacyTests(unittest.TestCase):
         coordinator = types.SimpleNamespace(data=data, last_update_success=True,
                                             power_capture=types.SimpleNamespace(export=lambda: {"enabled": False}))
         entry = types.SimpleNamespace(data={"username": "private_user", "password": "private_password"},
-                                      options={}, entry_id="test")
+                                      options={"tou_master_serial": "private_serial"}, entry_id="test")
         hass = types.SimpleNamespace(data={"solark": {"test": {"coordinator": coordinator}}})
         result = asyncio.run(module.async_get_config_entry_diagnostics(hass, entry))
         self.assertNotIn("private_", str(result))

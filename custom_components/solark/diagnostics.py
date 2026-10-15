@@ -16,6 +16,7 @@ TO_REDACT = {
     "refresh_token",
     "token",
     CONF_PLANT_ID,
+    "tou_master_serial",  # Redact legacy manual selections until options are saved again.
 }
 
 

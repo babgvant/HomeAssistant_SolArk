@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- Add master-inverter TOU writes: six battery SOC targets, six start times, and a
+  schedule enable switch, based on captured portal read/set requests. Preserve
+  the full work-mode form, serialize edits, and handle delayed cloud readback.
+- Automatically identify the TOU master by Modbus position 1, recheck its position
+  before writing, and reject secondary writes. Disable writes when detection is
+  incomplete or ambiguous. Remove the manual master serial option.
+
 ### 5.1.2
 
 - Reject staggered cloud uploads whose plant power matches only the newly updated

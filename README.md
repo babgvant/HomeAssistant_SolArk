@@ -12,6 +12,7 @@ inverters, batteries, and the Home Assistant Energy Dashboard.
 - Device details including model, serial number, firmware, and connection status
 - Automatic API discovery and credential reauthentication
 - Downloadable, privacy-safe diagnostics
+- Master-inverter TOU battery SOC targets, start times, and schedule enable control
 
 ## Installation
 
@@ -93,6 +94,34 @@ incomplete or inconsistent cloud telemetry; it is not an Energy Dashboard correc
 If the inverter-list endpoint has never exposed a physical inverter since startup,
 the integration cannot infer that device. Diagnostics will show the discovered
 `expected_inverters` count; this remains a Sol-Ark Cloud API limitation.
+
+## Time-of-use controls
+
+The integration automatically identifies the master by **Modbus SN** (`modbusSn`)
+in inverter settings: position **1** is the master, and positions **2+** are
+secondary inverters. No manual serial selection is needed. Device names and API
+list order do not affect master detection.
+
+Only the detected master has six **TOU battery SOC** number entities (0–100%),
+six **TOU start time** entities, and a **Time of use** switch under its configuration
+controls. Times use the inverter's local clock with minute precision. Controls are
+unavailable when the account or inverter cannot return a complete settings form.
+Settings refresh every minute, independently of telemetry.
+
+Each edit reads the current settings and submits the portal's complete work-mode
+form, preserving power limits, voltage targets, charging flags, active weekdays,
+and other work-mode values. Those additional fields are preserved, not exposed as
+editable controls. Writes target only the detected master. Secondary inverters
+inherit the master's settings; the integration never sends TOU writes to them.
+If settings cannot be read for every discovered inverter, or no unique position-1
+master is found, TOU writes are disabled until detection succeeds. The master
+position is checked again immediately before each write. Secondary TOU controls
+from the initial implementation are removed on reload after master detection.
+
+A successful command means the cloud accepted the update for delivery. Submitted
+values are shown for up to two minutes while waiting for cloud readback; if they
+are not confirmed, controls revert to the values returned by the cloud. Avoid
+simultaneous edits in the portal while automations are updating TOU settings.
 
 ## Main plant sensors
 

@@ -6,9 +6,11 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers import entity_registry as er
 
 from .api import SolArkCloudAPI
 from .coordinator import SolArkDataUpdateCoordinator
+from .tou_entity import SolArkTOUCoordinator
 from .const import (
     DOMAIN,
     CONF_USERNAME,
@@ -114,9 +116,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await coordinator.async_config_entry_first_refresh()
 
+    tou_coordinator = SolArkTOUCoordinator(hass, entry, coordinator)
+    await tou_coordinator.async_refresh()
+
+    # Retire TOU entities created for secondary inverters by the initial implementation.
+    registry = er.async_get(hass)
+    prefix = f"{entry.entry_id}:inverter:"
+    for entity in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if entity.unique_id.startswith(prefix) and ":tou:" in entity.unique_id:
+            serial = entity.unique_id[len(prefix):].split(":tou:", 1)[0]
+            if tou_coordinator.master_serial is not None and serial != tou_coordinator.master_serial:
+                registry.async_remove(entity.entity_id)
+
     hass.data[DOMAIN][entry.entry_id] = {
         "api": api,
         "coordinator": coordinator,
+        "tou_coordinator": tou_coordinator,
     }
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))

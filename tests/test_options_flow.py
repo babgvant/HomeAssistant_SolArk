@@ -103,3 +103,14 @@ class OptionsFlowTests(unittest.TestCase):
         self.assertEqual(result["data"]["diagnostic_drop_percent"], 30)
         flow.hass.config_entries.async_update_entry.assert_called_once()
         self.assertIs(flow.hass.config_entries.async_update_entry.call_args.args[0], entry)
+
+    def test_legacy_master_selection_is_removed(self):
+        module, entry, flow = self.make_flow()
+        entry.options["tou_master_serial"] = "MASTER-SERIAL"
+        shown = asyncio.run(flow.async_step_init())
+        self.assertNotIn("tou_master_serial", shown["data_schema"]({}))
+        with patch.object(module, "_resolve_for_flow", AsyncMock(return_value=(
+            "https://www.solarkcloud.com", "https://p2.api.solarkcloud.com", False
+        ))):
+            result = asyncio.run(flow.async_step_init({"scan_interval": 90}))
+        self.assertNotIn("tou_master_serial", result["data"])
