@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- Use the Home Assistant timezone for plant-flow and inverter-day API queries,
+  preventing wrong-day requests during local evening hours.
+- Serialize concurrent token renewal and keep delayed unauthorized responses
+  from discarding a replacement token.
+- Keep independent inverter and energy readings available when plant flow
+  fails. Affected site power and SOC readings become unavailable; total primary
+  telemetry outages still mark the coordinator unavailable.
+
 - Add master-inverter TOU writes: six battery SOC targets, six start times, and a
   schedule enable switch, based on captured portal read/set requests. Preserve
   the full work-mode form, serialize edits, and handle delayed cloud readback.

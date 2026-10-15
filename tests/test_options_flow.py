@@ -64,6 +64,19 @@ def load_flow():
 
 
 class OptionsFlowTests(unittest.TestCase):
+    def test_connection_uses_home_assistant_timezone(self):
+        module = load_flow()
+        hass = types.SimpleNamespace(config=types.SimpleNamespace(time_zone="America/Chicago"))
+        module.SolArkCloudAPI.return_value.test_connection = AsyncMock(return_value=True)
+        with patch.object(module, "_resolve_for_flow", AsyncMock(return_value=(
+            "https://portal.example", "https://api.example", False
+        ))):
+            result = asyncio.run(module._test_connection(hass, {
+                "username": "test", "password": "test", "plant_id": "site"
+            }))
+        self.assertTrue(result[0])
+        self.assertEqual(module.SolArkCloudAPI.call_args.kwargs["timezone"], "America/Chicago")
+
     def make_flow(self):
         module = load_flow()
         entry = types.SimpleNamespace(

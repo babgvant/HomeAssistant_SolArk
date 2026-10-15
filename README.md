@@ -84,6 +84,11 @@ default (configurable in integration options). Inverter detail telemetry refresh
 every five minutes; gateway/plant metadata refreshes every 30 minutes. Cloud source
 readings may be older than the polling time.
 
+Day-based API queries use the Home Assistant timezone. If plant flow fails,
+independent inverter and energy readings remain available while affected site
+power and SOC readings become unavailable. A complete cloud telemetry outage
+makes the integration's telemetry entities unavailable.
+
 Load, grid, and battery power use the plant flow endpoint. It supplies site-level
 values and direction flags (grid import/export and battery charge/discharge), while
 summing inverter copies could double-count firmware that repeats a master/system

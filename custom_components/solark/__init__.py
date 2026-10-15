@@ -110,6 +110,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         base_url=base_url,
         api_url=api_url,
         session=session,
+        timezone=hass.config.time_zone,
     )
 
     coordinator = SolArkDataUpdateCoordinator(hass, entry, api)

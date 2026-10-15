@@ -7,6 +7,7 @@ import logging
 import re
 from time import monotonic
 from typing import Any, Dict, Iterable, Optional
+from zoneinfo import ZoneInfo
 
 import aiohttp
 
@@ -89,6 +90,7 @@ class SolArkCloudAPI:
         base_url: str,
         api_url: str,
         session: aiohttp.ClientSession,
+        timezone: str = "UTC",
     ) -> None:
         self.username = username
         self.password = password
@@ -102,6 +104,8 @@ class SolArkCloudAPI:
         self.api_url = api_url.rstrip("/")
 
         self._session = session
+        self._timezone = ZoneInfo(timezone)
+        self._login_lock = asyncio.Lock()
 
         self._token: Optional[str] = None
         self._refresh_token: Optional[str] = None
@@ -136,8 +140,16 @@ class SolArkCloudAPI:
     async def _ensure_token(self) -> None:
         if self._token and self._token_expiry and datetime.utcnow() < self._token_expiry:
             return
-        _LOGGER.debug("Token missing or expired, logging in again")
-        await self.login()
+        async with self._login_lock:
+            # Another request may have renewed the token while we waited.
+            if self._token and self._token_expiry and datetime.utcnow() < self._token_expiry:
+                return
+            _LOGGER.debug("Token missing or expired, logging in again")
+            await self.login()
+
+    def _local_date(self) -> str:
+        """Use the HA-configured day for date-scoped cloud telemetry."""
+        return datetime.now(self._timezone).strftime("%Y-%m-%d")
 
     async def _request(
         self,
@@ -180,8 +192,11 @@ class SolArkCloudAPI:
                     resp.status,
                 )
                 if resp.status == 401 and auth_required and retry_auth:
-                    self._token = None
-                    self._token_expiry = None
+                    # A delayed response for an old token must not invalidate
+                    # a replacement already obtained by a concurrent request.
+                    if headers.get("Authorization") == f"Bearer {self._token}":
+                        self._token = None
+                        self._token_expiry = None
                     return await self._request(
                         method,
                         endpoint,
@@ -496,7 +511,7 @@ class SolArkCloudAPI:
         response = await self._request(
             "GET",
             f"/api/v1/plant/energy/{self.plant_id}/flow",
-            {"date": datetime.utcnow().strftime("%Y-%m-%d")},
+            {"date": self._local_date()},
         )
         return self._response_data(response)
 
@@ -537,7 +552,7 @@ class SolArkCloudAPI:
         parameter_ids: Iterable[int],
     ) -> Dict[int, Any]:
         """Fetch the latest value for requested inverter catalogue parameters."""
-        date = datetime.utcnow().strftime("%Y-%m-%d")
+        date = self._local_date()
         response = await self._request(
             "GET",
             f"/api/v1/inverter/{inverter_id}/day",
@@ -631,7 +646,7 @@ class SolArkCloudAPI:
     async def _get_flow_data(self) -> Dict[str, Any]:
         """Fetch plant power flow data (pv, batt, grid, load, soc)."""
         await self._ensure_token()
-        date_str = datetime.utcnow().strftime("%Y-%m-%d")
+        date_str = self._local_date()
         params = {"date": date_str}
         endpoint = f"/api/v1/plant/energy/{self.plant_id}/flow"
         _LOGGER.debug(

@@ -65,6 +65,7 @@ async def _test_connection(
         base_url=base_url,
         api_url=api_url,
         session=session,
+        timezone=hass.config.time_zone,
     )
 
     try:

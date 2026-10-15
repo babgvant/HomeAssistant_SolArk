@@ -52,6 +52,14 @@ counters use `SensorStateClass.TOTAL_INCREASING`.
 - Informational inverter flow, battery, and parameter details are cached for five
   minutes.
 - Failure of an optional equipment endpoint should affect only that data group.
+- Plant-flow failure leaves independent energy/equipment data available, but
+  clears site flow power and SOC (including held plant PV fallback). Independently
+  complete inverter PV sums remain usable. If all primary telemetry sources
+  (flow, inverter summaries, realtime, generation/use) return no data, the
+  coordinator fails rather than republishing cached topology as live telemetry.
+- Date-scoped flow and inverter-day queries use the Home Assistant timezone.
+- Concurrent token renewal is serialized; late 401s for old tokens cannot
+  discard a newer token.
 - Authentication rejection initiates Home Assistant reauthentication.
 
 ## Identity and compatibility

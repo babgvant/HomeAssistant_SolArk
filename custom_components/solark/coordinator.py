@@ -119,9 +119,6 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 for serial in fresh_inverter_serials:
                     self._inverter_summary_at[serial] = summary_at
             flow = await self._optional("plant_flow", self.api.async_get_plant_flow(), errors)
-            if flow is None:
-                self.power_capture.record({"endpoint_errors": errors}, self._endpoint_timing)
-                raise UpdateFailed("Sol-Ark plant flow request failed")
             realtime = await self._optional(
                 "plant_realtime", self.api.async_get_plant_realtime(), errors
             ) or {}
@@ -130,6 +127,13 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.api.async_get_plant_generation_use(),
                 errors,
             ) or {}
+            # Cached topology/metadata cannot establish live cloud health.
+            # Keep independent readings on a partial outage, but mark the
+            # coordinator unavailable if no primary telemetry source responds.
+            if not any((flow, inverter_summaries, realtime, generation_use)):
+                self.power_capture.record({"endpoint_errors": errors}, self._endpoint_timing)
+                raise UpdateFailed("Sol-Ark cloud returned no telemetry")
+            flow = flow or {}
         except SolArkCloudAuthenticationError as err:
             self.power_capture.record({"endpoint_errors": errors}, self._endpoint_timing)
             raise ConfigEntryAuthFailed("Sol-Ark credentials were rejected") from err
@@ -391,6 +395,8 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         coverage = site_flow_coverage(flow, realtime, inverter_raw) if all(
             str(item["sn"]) in fresh_inverter_serials for item in inverter_raw
         ) else {"status": "unverified", "reason": "stale_inverter_list"}
+        if not flow:
+            coverage = {"status": "unavailable", "reason": "plant_flow_unavailable"}
         normalized["debug_diagnostics"]["site_flow_coverage"] = coverage
         if coverage["status"] == "partial":
             sanity = {**sanity, "accepted": False, "reason": "staggered_upload_subtotal"}
@@ -404,7 +410,7 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "aggregation_method": "validated_plant_flow",
                     "sample_age_seconds": 0.0,
                 })
-            elif self._last_valid_plant_pv is not None:
+            elif flow and self._last_valid_plant_pv is not None:
                 previous, accepted_at = self._last_valid_plant_pv
                 age = now - accepted_at
                 if timedelta(0) <= age <= PLANT_PV_HOLD_INTERVAL:
@@ -434,7 +440,7 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "battery_power", "battery_charge_power", "battery_discharge_power",
         ):
             aggregation[key] = {
-                "aggregation_method": "authoritative_site_flow",
+                "aggregation_method": "authoritative_site_flow" if flow else "unavailable_site_flow",
                 "expected_inverters": len(normalized["inverters"]),
             }
 
