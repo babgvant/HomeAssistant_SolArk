@@ -5,11 +5,11 @@ from .tou_entity import SolArkTOUEntity, setup_tou_entities
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
-    setup_tou_entities(hass, entry, async_add_entities, lambda coordinator, serial: (
-        *(SolArkTOUSOC(coordinator, entry, serial, f"cap{slot}", f"TOU {slot} battery SOC")
+    setup_tou_entities(hass, entry, async_add_entities, lambda coordinator: (
+        *(SolArkTOUSOC(coordinator, entry, f"cap{slot}", f"TOU {slot} battery SOC")
           for slot in range(1, 7)),
-        SolArkTOUSOC(coordinator, entry, serial, "sdStartCap", "Grid charge start SOC"),
-        SolArkGridChargeCurrent(coordinator, entry, serial, "sdBatteryCurrent", "Grid charge current"),
+        SolArkTOUSOC(coordinator, entry, "sdStartCap", "Grid charge start SOC"),
+        SolArkGridChargeCurrent(coordinator, entry, "sdBatteryCurrent", "Grid charge current"),
     ))
 
 

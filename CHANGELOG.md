@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- Expose TOU and battery grid-charge controls on the plant device, with stable
+  identities across master changes. Migrate existing master controls without
+  changing entity IDs, retaining master-only routing and write validation.
+
 - Add six TOU grid-charge switches plus battery-level grid-charge permission,
   start SOC, and DC current controls for predictive energy-cost automations.
   Preserve the separate captured battery form, enforce the battery current limit,

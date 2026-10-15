@@ -5,10 +5,10 @@ from .tou_entity import SolArkTOUEntity, setup_tou_entities
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
-    setup_tou_entities(hass, entry, async_add_entities, lambda coordinator, serial: (
-        SolArkTOUSwitch(coordinator, entry, serial, "peakAndVallery", "Time of use"),
-        SolArkTOUSwitch(coordinator, entry, serial, "sdChargeOn", "Grid charging"),
-        *(SolArkTOUSwitch(coordinator, entry, serial, f"time{slot}on", f"TOU {slot} grid charging")
+    setup_tou_entities(hass, entry, async_add_entities, lambda coordinator: (
+        SolArkTOUSwitch(coordinator, entry, "peakAndVallery", "Time of use"),
+        SolArkTOUSwitch(coordinator, entry, "sdChargeOn", "Grid charging"),
+        *(SolArkTOUSwitch(coordinator, entry, f"time{slot}on", f"TOU {slot} grid charging")
           for slot in range(1, 7)),
     ))
 

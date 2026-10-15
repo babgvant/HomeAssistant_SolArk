@@ -12,7 +12,7 @@ inverters, batteries, and the Home Assistant Energy Dashboard.
 - Device details including model, serial number, firmware, and connection status
 - Automatic API discovery and credential reauthentication
 - Downloadable, privacy-safe diagnostics
-- Master-inverter TOU targets, start times, grid-charge permissions, start SOC,
+- Plant-level TOU targets, start times, grid-charge permissions, start SOC,
   and current controls for energy-cost automations
 
 ## Installation
@@ -108,7 +108,8 @@ in inverter settings: position **1** is the master, and positions **2+** are
 secondary inverters. No manual serial selection is needed. Device names and API
 list order do not affect master detection.
 
-Only the detected master has these configuration controls:
+The **plant device** exposes these configuration controls. The integration routes
+their reads and writes through the automatically detected master inverter:
 
 | Control | Purpose |
 |---|---|
@@ -129,7 +130,9 @@ form: work-mode for TOU edits, battery settings for grid-charge permission, star
 SOC, and current. Other fields in that form are preserved, including generator
 settings, battery limits, voltage targets, and active weekdays. Battery controls
 are unavailable if the full battery form is missing; TOU controls remain usable.
-Writes target only the detected master. Secondary inverters
+Existing master controls move to the plant on reload while retaining their entity
+IDs and user customizations. Plant control identities remain stable if the detected
+master changes. Writes target only the detected master. Secondary inverters
 inherit the master's settings; the integration never sends TOU writes to them.
 If settings cannot be read for every discovered inverter, or no unique position-1
 master is found, TOU writes are disabled until detection succeeds. The master
@@ -154,7 +157,7 @@ start condition. Keep the start threshold below the charging target. See the
 Home Assistant automations can combine tariff windows, solar forecasts, battery
 SOC, and expected consumption to choose the six periods and their targets. Use
 `number.set_value`, `time.set_value`, and `switch.turn_on`/`switch.turn_off` with
-the actual entity IDs on the master inverter. Configure the current limit, start
+the actual entity IDs on the plant device. Configure the current limit, start
 threshold, times, and targets first, then enable the intended charging period and
 grid-charge permission. Disabling a period's charge permission does not disable
 the TOU schedule or solar charging.

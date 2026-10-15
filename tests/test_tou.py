@@ -57,7 +57,7 @@ def api_with_cloud(cloud=None, response=None, secondary=None):
         await asyncio.sleep(0)  # Exercise concurrent edits and per-device serialization.
         if method == "GET":
             return {"code": 0, "success": True, "data": deepcopy(secondary if target == "SECONDARY" else cloud)}
-        assert target == "TEST-SERIAL"
+        assert target == api.tou_master_serial
         writes.append(deepcopy(data))
         return response if response is not None else {"code": 0, "success": True, "data": None}
 
@@ -182,6 +182,17 @@ def test_control_platforms_poll_write_and_handle_unavailable_settings():
 
     package = stub("solark_tou_test")
     package.__path__ = [str(ROOT)]
+    from unittest.mock import Mock
+    registry = Mock()
+    registry.async_get_entity_id.return_value = None
+    legacy = SimpleNamespace(
+        entity_id="number.existing_target", domain="number",
+        unique_id="test-entry:inverter:TEST-SERIAL:tou:cap2")
+    registry_entities = [legacy]
+    registry.async_update_entity.side_effect = lambda entity_id, **kwargs: setattr(
+        legacy, "unique_id", kwargs["new_unique_id"])
+    entity_registry = stub("entity_registry", async_get=lambda hass: registry,
+                           async_entries_for_config_entry=lambda registry, entry_id: list(registry_entities))
     modules = {
         "solark_tou_test": package, "solark_tou_test.api": API,
         "homeassistant.config_entries": stub("config_entries", ConfigEntryAuthFailed=type("AuthFailed", (Exception,), {})),
@@ -191,6 +202,7 @@ def test_control_platforms_poll_write_and_handle_unavailable_settings():
         "homeassistant.components.number": stub("number", NumberEntity=type("NumberEntity", (), {}), NumberMode=SimpleNamespace(BOX="box")),
         "homeassistant.components.time": stub("time", TimeEntity=type("TimeEntity", (), {})),
         "homeassistant.components.switch": stub("switch", SwitchEntity=type("SwitchEntity", (), {})),
+        "homeassistant.helpers": stub("helpers", entity_registry=entity_registry),
     }
     with patch.dict(sys.modules, modules):
         loaded = {}
@@ -207,7 +219,8 @@ def test_control_platforms_poll_write_and_handle_unavailable_settings():
         entry = SimpleNamespace(entry_id="test-entry", options={"tou_master_serial": "SECONDARY"},
                                 async_on_unload=lambda callback: None)
         # Discovery order must not select the target.
-        telemetry = SimpleNamespace(api=api, data={"inverters": {"SECONDARY": {}, "TEST-SERIAL": {}}})
+        telemetry = SimpleNamespace(api=api, data={"plant": {"id": "TEST-PLANT"},
+                                                 "inverters": {"SECONDARY": {}, "TEST-SERIAL": {}}})
         coordinator = loaded["tou_entity"].SolArkTOUCoordinator(None, entry, telemetry)
         coordinator.data = await coordinator._async_update_data()
         hass = SimpleNamespace(data={"solark": {entry.entry_id: {
@@ -220,8 +233,12 @@ def test_control_platforms_poll_write_and_handle_unavailable_settings():
         assert all(entity.serial == "TEST-SERIAL" for entity in entities)
         assert set(coordinator.data) == {"TEST-SERIAL"}
         assert len({entity._attr_unique_id for entity in entities}) == 22
+        assert all(entity._attr_unique_id == f"test-entry:plant:tou:{entity.key}" for entity in entities)
+        registry.async_update_entity.assert_called_once_with(
+            "number.existing_target", new_unique_id="test-entry:plant:tou:cap2", device_id=None)
         assert all(entity.available for entity in entities)
-        assert entities[0]._attr_device_info["identifiers"] == {("solark", "inverter:TEST-SERIAL")}
+        assert all(entity._attr_device_info["identifiers"] == {
+            ("solark", "test-entry"), ("solark", "plant:TEST-PLANT")} for entity in entities)
         await entities[1].async_set_native_value(85)
         assert entities[1].native_value == 85
         await by_key['sellTime2'].async_set_value(time(8, 30))
@@ -274,6 +291,21 @@ def test_control_platforms_poll_write_and_handle_unavailable_settings():
         assert coordinator.master_serial == "TEST-SERIAL"
         assert all(entity.available for entity in entities)
 
+        # The same plant entities follow a newly detected master, without duplicates.
+        unique_ids = [entity._attr_unique_id for entity in entities]
+        cloud['modbusSn'] = 2
+        secondary['modbusSn'] = 1
+        coordinator.async_set_updated_data(await coordinator._async_update_data())
+        assert coordinator.master_serial == 'SECONDARY'
+        assert len(entities) == 22
+        assert all(entity.serial == 'SECONDARY' and entity.available for entity in entities)
+        assert [entity._attr_unique_id for entity in entities] == unique_ids
+        await by_key['sdChargeOn'].async_turn_on()
+        assert writes[-1]['sdChargeOn'] == '1'
+        cloud['modbusSn'] = 1
+        secondary['modbusSn'] = 3
+        coordinator.async_set_updated_data(await coordinator._async_update_data())
+
         # Discovery can recover after platform setup, without a reload or duplicates.
         coordinator.master_serial = None
         late_entities = []
@@ -310,6 +342,23 @@ def test_control_platforms_poll_write_and_handle_unavailable_settings():
         assert all(not entity.available for entity in entities)
         assert coordinator.master_inverters == {}
         assert api.tou_master_serial is None
+
+        # Registry migration removes legacy secondary controls and avoids collisions.
+        migrate = loaded['tou_entity'].migrate_tou_entities
+        other_registry = Mock()
+        other_registry.async_get_entity_id.return_value = 'number.plant_target'
+        secondary_entity = SimpleNamespace(entity_id='number.secondary', domain='number',
+                                          unique_id='test-entry:inverter:SECONDARY:tou:cap2')
+        master_entity = SimpleNamespace(entity_id='number.old_master', domain='number',
+                                       unique_id='test-entry:inverter:TEST-SERIAL:tou:cap2')
+        unrelated = SimpleNamespace(entity_id='sensor.power', domain='sensor',
+                                    unique_id='test-entry:inverter:TEST-SERIAL:power')
+        migrate(other_registry, [master_entity, secondary_entity, unrelated], 'test-entry', None)
+        other_registry.async_remove.assert_not_called()
+        migrate(other_registry, [master_entity, secondary_entity, unrelated], 'test-entry', 'TEST-SERIAL')
+        assert [call.args[0] for call in other_registry.async_remove.call_args_list] == [
+            'number.old_master', 'number.secondary']
+        other_registry.async_update_entity.assert_not_called()
     asyncio.run(run())
 
 

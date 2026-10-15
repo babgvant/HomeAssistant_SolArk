@@ -70,6 +70,13 @@ identities. Inverters use their gateway as `via_device` when the relation exists
 The original nine entities retain their `{config_entry_id}_{key}` unique IDs. New
 scoped equipment entities use `{config_entry_id}:{scope}:{stable_id}:{key}`.
 
+TOU and battery grid-charge controls belong to the plant and use
+`{config_entry_id}:plant:tou:{key}`. Their current read/write target is the uniquely
+detected Modbus master, resolved dynamically. Legacy master control registry
+entries migrate in place before platform entity creation (including delayed master
+discovery), preserving entity IDs and customizations. Legacy secondary controls
+are retired; no controls are created for individual inverters.
+
 ## Endpoint-specific conventions
 
 - Plant/inverter flow battery power is an unsigned magnitude interpreted with `toBat`

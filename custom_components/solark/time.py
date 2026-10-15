@@ -8,8 +8,8 @@ from .tou_entity import SolArkTOUEntity, setup_tou_entities
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
-    setup_tou_entities(hass, entry, async_add_entities, lambda coordinator, serial: (
-        SolArkTOUTime(coordinator, entry, serial, f"sellTime{slot}", f"TOU {slot} start time")
+    setup_tou_entities(hass, entry, async_add_entities, lambda coordinator: (
+        SolArkTOUTime(coordinator, entry, f"sellTime{slot}", f"TOU {slot} start time")
         for slot in range(1, 7)))
 
 
