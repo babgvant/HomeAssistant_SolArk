@@ -392,7 +392,7 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             for serial in pv_aggregation["contributing_inverters"]
         )
         sanity = plant_pv_sanity(plant_flow_values, known_pv)
-        coverage = site_flow_coverage(flow, realtime, inverter_raw) if all(
+        coverage = site_flow_coverage(flow, realtime, inverter_raw, now) if all(
             str(item["sn"]) in fresh_inverter_serials for item in inverter_raw
         ) else {"status": "unverified", "reason": "stale_inverter_list"}
         if not flow:
@@ -401,6 +401,7 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if coverage["status"] == "partial":
             sanity = {**sanity, "accepted": False, "reason": "staggered_upload_subtotal"}
         pv_aggregation["plant_flow_sanity"] = sanity
+        pv_aggregation["site_flow_coverage"] = coverage
         if normalized["plant"]["values"]["pv_power"] is None:
             if sanity["accepted"]:
                 candidate = plant_flow_values["pv_power"]
@@ -408,6 +409,19 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 normalized["plant"]["values"]["pv_power"] = candidate
                 pv_aggregation.update({
                     "aggregation_method": "validated_plant_flow",
+                    "quality": "balanced",
+                    "sample_age_seconds": 0.0,
+                })
+            elif (sanity["reason"] == "power_balance_mismatch"
+                  and coverage["status"] == "complete" and coverage.get("source_fresh")):
+                # Publish the reported PV, never the AC summary sum. Coverage
+                # corroborates completeness, not the other flow measurements.
+                # Keep the failed sanity result and do not seed either hold cache
+                # with an imbalanced snapshot.
+                normalized["plant"]["values"]["pv_power"] = plant_flow_values["pv_power"]
+                pv_aggregation.update({
+                    "aggregation_method": "coverage_corroborated_plant_flow",
+                    "quality": "power_balance_mismatch",
                     "sample_age_seconds": 0.0,
                 })
             elif flow and self._last_valid_plant_pv is not None:
@@ -417,6 +431,7 @@ class SolArkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     normalized["plant"]["values"]["pv_power"] = previous
                     pv_aggregation.update({
                         "aggregation_method": "held_validated_plant_flow",
+                        "quality": "held",
                         "sample_age_seconds": age.total_seconds(),
                     })
         else:

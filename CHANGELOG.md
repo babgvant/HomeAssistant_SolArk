@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- Keep reported plant PV available on a power-balance mismatch when fresh,
+  complete inverter upload evidence corroborates coverage. Expose explicit
+  quality, coverage, source age and failed balance validation without treating
+  AC summaries as PV or weakening partial-upload and bounded-hold protections.
+
 - Expose TOU and battery grid-charge controls on the plant device, with stable
   identities across master changes. Migrate existing master controls without
   changing entity IDs, retaining master-only routing and write validation.

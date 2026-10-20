@@ -14,6 +14,17 @@ Rejected fallback samples hold the previous accepted plant value for at most two
 minutes with an explicit age, then become unavailable. This cannot prove coverage
 of a consistently partial cloud snapshot.
 
+If only the balance check fails, fresh complete `site_flow_coverage` evidence
+permits reported plant PV with `coverage_corroborated_plant_flow` and
+`quality: power_balance_mismatch`. The failed sanity result remains visible.
+Every known summary must be present in the current response, the plant and
+inverter timestamps must align within 60 seconds, and all source timestamps must
+be between now and six minutes old (observed five-minute uploads plus skew).
+No AC power is substituted for PV. This exception cannot bypass invalid inputs,
+auxiliary-mode exclusions or known inverter lower bounds, and cannot seed or
+refresh the balanced PV/site-flow hold caches. Completeness and absolute source
+freshness are reported separately from power-balance quality.
+
 Plant flow also has a staggered-upload guard: compare plant realtime `pac` with
 inverter-summary `pac` using a 10 W or 0.1% rounding allowance. When flow PV matches
 that snapshot, the plant timestamp is within 60 seconds of the newest inverter,

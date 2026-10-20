@@ -1,5 +1,60 @@
 # Power dip investigation — October 5, 2026
 
+## October 20 balance mismatch with complete coverage
+
+The incident report establishes a PV availability failure in the 5.1.2 fallback:
+reported plant PV was 11,899 W, load 11,860 W, export 1,020 W and battery charge
+66 W. Sources minus sinks was -1,047 W, exceeding the unchanged 647.3 W balance
+tolerance. Optional inverter detail endpoints were empty, so there was no complete
+inverter PV sum. The balanced fallback held 7,123 W until its two-minute expiry,
+then PV became unavailable despite successful polls. At 14:17:19 America/Chicago,
+the 11,726 W snapshot balanced within 71 W and recovered automatically.
+
+All three current summary powers (2,934 + 4,189 + 4,776 W) agreed with reported
+plant PV, and coverage was `complete` / `matching_complete_upload`. This proves
+why validation rejected PV, but does not establish why the cloud flow components
+disagreed, or which component was inaccurate.
+
+The correction keeps the balance result independent of coverage. Only a balance
+mismatch can use `coverage_corroborated_plant_flow`, publishing reported plant PV
+with `quality: power_balance_mismatch` and the failed sanity check intact. Coverage
+compares plant and inverter `pac` like for like, then requires plant flow PV to
+match within rounding. The September 22 documented capture supports this agreement
+in a charging/import mode; October 6 subtotal fixtures establish why complete,
+aligned contributor coverage is necessary. Neither establishes AC power as PV
+across operating modes. No `pac` value is substituted, and generator/Smart
+Load/AC-coupled exclusions remain.
+
+The exception requires every known inverter in the current list, timestamps
+aligned within 60 seconds, and all source ages from zero through six minutes.
+Six minutes accommodates observed five-minute uploads plus skew; it does not
+extend the two-minute hold. Absolute age is distinct from relative completeness.
+Missing lists, stale sources, different AC/PV conventions, invalid inputs, or PV
+below known inverter production cannot authorize the exception. Imbalanced
+snapshots refresh neither balanced hold cache.
+
+Sensor attributes and bounded diagnostic samples retain source method, quality,
+raw balance, sanity rejection, coverage and source age. Partial-upload behavior
+still holds the last balanced complete site snapshot, then expires. Downstream
+Solar Power and EV solar-current calculations can remain numeric for the incident,
+but the surplus calculation inherits the cloud inconsistency. Consumers requiring
+balanced telemetry can gate on `plant_flow_sanity.accepted`.
+
+Regression tests cover the incident beyond the old hold interval, balanced
+recovery, missing and short lists, freshness boundaries, missing/misaligned times,
+AC/PV disagreement, invalid and auxiliary readings, known inverter lower bounds,
+and hold expiry without renewing a balanced baseline. Original raw captures are
+absent from this checkout; validation uses sanitized research and existing
+capture-derived tests, plus incident arithmetic. No live settings or deployment
+were changed. Coverage is limited to discovered topology and comparable cloud
+representations, not independent physical measurement or proof of cloud accuracy.
+
+Validation: `.venv/Scripts/python.exe -m pytest -q
+--ignore=tests/test_sensor_metadata.py` passed 106 tests and 38 subtests. The
+full-suite attempt could not collect the sensor metadata module because the local
+Home Assistant dependency environment lacks `jinja2`. Existing API `utcnow()`
+deprecation warnings remain unrelated to this correction.
+
 ## October 6 capture and 5.1.2 correction
 
 The supplied 5.1.1 event export contains 223 unique retained polls, with capture

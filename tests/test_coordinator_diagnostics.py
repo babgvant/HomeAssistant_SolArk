@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 import importlib.util
 from pathlib import Path
 import sys
@@ -91,6 +91,109 @@ class FakeAPI:
 
 
 class CoordinatorDiagnosticsTests(unittest.TestCase):
+    def incident(self):
+        """Sanitized October 20 arithmetic; optional inverter endpoints are empty."""
+        module = load_coordinator()
+        api = FakeAPI()
+        timestamp = datetime.now(timezone.utc).isoformat()
+        api.summaries = [dict(sn=str(i), id=i, pac=power, updateAt=timestamp)
+                         for i, power in enumerate((2934, 4189, 4776), 1)]
+        snapshot = dict(pvPower=11899, loadOrEpsPower=11860,
+                        gridOrMeterPower=1020, toGrid=True, battPower=66, toBat=True)
+        realtime = dict(pac=11899, updateAt=timestamp)
+        async def flow(): return dict(snapshot)
+        async def rt(): return dict(realtime)
+        api.async_get_plant_flow, api.async_get_plant_realtime = flow, rt
+        entry = types.SimpleNamespace(data={"plant_id": "site"}, options={"diagnostic_capture": True}, title="Site")
+        return module, api, snapshot, realtime, module.SolArkDataUpdateCoordinator(None, entry, api)
+
+    def test_complete_coverage_balance_mismatch_and_recovery(self):
+        module, api, snapshot, realtime, coordinator = self.incident()
+        started = datetime.now(timezone.utc)
+        for _ in range(2):
+            # The same upload remains fresh beyond the old two-minute PV hold.
+            with patch.object(module, "datetime") as clock:
+                clock.now.return_value = started + timedelta(seconds=_ * 180)
+                result = asyncio.run(coordinator._async_update_data())
+            self.assertEqual(result["plant"]["values"]["pv_power"], 11899)
+            attributes = result["aggregation"]["pv_power"]
+            self.assertEqual(attributes["aggregation_method"], "coverage_corroborated_plant_flow")
+            self.assertEqual(attributes["quality"], "power_balance_mismatch")
+            self.assertEqual(attributes["site_flow_coverage"]["status"], "complete")
+            sanity = attributes["plant_flow_sanity"]
+            self.assertFalse(sanity["accepted"])
+            self.assertEqual(sanity["power_balance_error"], -1047)
+            self.assertAlmostEqual(sanity["tolerance_watts"], 647.3)
+            self.assertTrue(all(inv["values"]["pv_power"] is None for inv in result["inverters"].values()))
+            self.assertIsNone(coordinator._last_valid_plant_pv)
+            self.assertIsNone(coordinator._last_complete_site_flow)
+        # No two-minute outage: each fresh corroborated poll uses current plant PV.
+        exported = coordinator.power_capture.export()["rolling_samples"][-1]
+        self.assertEqual(exported["powers"]["pv_power"], 11899)
+        self.assertEqual(exported["aggregation"]["quality"], "power_balance_mismatch")
+        self.assertEqual(exported["aggregation"]["plant_flow_sanity"]["reason"], "power_balance_mismatch")
+        self.assertEqual(exported["endpoint_measurements"]["power_balance"]["power_balance_error"], -1047)
+        snapshot.update(pvPower=11726, loadOrEpsPower=2070, gridOrMeterPower=7110, battPower=2475)
+        recovered = asyncio.run(coordinator._async_update_data())
+        self.assertEqual(recovered["plant"]["values"]["pv_power"], 11726)
+        self.assertEqual(recovered["energy_balance"]["power_balance_error"], 71)
+        self.assertEqual(recovered["aggregation"]["pv_power"]["aggregation_method"], "validated_plant_flow")
+        self.assertEqual(recovered["aggregation"]["pv_power"]["quality"], "balanced")
+
+    def test_corroboration_cannot_bypass_other_guards(self):
+        for case in ("short_list", "missing_list", "stale", "future", "unaligned", "missing_time",
+                     "different_ac", "invalid_pv", "invalid_load", "generator", "smart_load", "known_pv"):
+            with self.subTest(case=case):
+                module, api, snapshot, realtime, coordinator = self.incident()
+                if case in ("short_list", "missing_list"):
+                    # Discover topology before the response loses a contributor.
+                    asyncio.run(coordinator._async_update_data())
+                    if case == "short_list":
+                        api.summaries = api.summaries[:2]
+                    else:
+                        async def missing(): return None
+                        api.async_get_inverters = missing
+                elif case in ("stale", "future"):
+                    offset = -361 if case == "stale" else 120
+                    timestamp = (datetime.now(timezone.utc) + timedelta(seconds=offset)).isoformat()
+                    realtime["updateAt"] = timestamp
+                    for item in api.summaries: item["updateAt"] = timestamp
+                elif case == "unaligned":
+                    realtime["updateAt"] = (datetime.now(timezone.utc) - timedelta(seconds=90)).isoformat()
+                elif case == "missing_time": realtime.pop("updateAt")
+                elif case == "different_ac": realtime["pac"] = 10000
+                elif case == "invalid_pv": snapshot["pvPower"] = float("nan")
+                elif case == "invalid_load": snapshot["loadOrEpsPower"] = -1
+                elif case == "generator": snapshot["genOn"] = True
+                elif case == "smart_load": snapshot["minPower"] = 100
+                elif case == "known_pv":
+                    async def inv_flow(inverter_id): return {"pvPower": 15000} if inverter_id == 1 else {}
+                    api.async_get_inverter_flow = inv_flow
+                result = asyncio.run(coordinator._async_update_data())
+                self.assertIsNone(result["plant"]["values"]["pv_power"])
+                self.assertNotEqual(result["aggregation"]["pv_power"]["aggregation_method"], "coverage_corroborated_plant_flow")
+
+    def test_lost_corroboration_uses_only_bounded_balanced_hold(self):
+        module, api, snapshot, realtime, coordinator = self.incident()
+        snapshot.update(pvPower=7123, loadOrEpsPower=6037)
+        asyncio.run(coordinator._async_update_data())
+        accepted_at = coordinator._last_valid_plant_pv[1]
+        snapshot.update(pvPower=11899, loadOrEpsPower=11860)
+        corroborated = asyncio.run(coordinator._async_update_data())
+        self.assertEqual(corroborated["plant"]["values"]["pv_power"], 11899)
+        self.assertEqual(coordinator._last_valid_plant_pv, (7123, accepted_at))
+        realtime.pop("updateAt")
+        held = asyncio.run(coordinator._async_update_data())
+        self.assertEqual(held["plant"]["values"]["pv_power"], 7123)
+        self.assertEqual(held["aggregation"]["pv_power"]["quality"], "held")
+        coordinator._last_valid_plant_pv = (7123, accepted_at - timedelta(seconds=121))
+        for invalid in (None, -1, float("inf"), float("nan")):
+            snapshot["pvPower"] = invalid
+            expired = asyncio.run(coordinator._async_update_data())
+            self.assertIsNone(expired["plant"]["values"]["pv_power"])
+        snapshot["pvPower"] = 11899
+        self.assertIsNone(asyncio.run(coordinator._async_update_data())["plant"]["values"]["pv_power"])
+
     def test_partial_power_is_unavailable_and_zero_is_valid(self):
         module = load_coordinator()
         api = FakeAPI()

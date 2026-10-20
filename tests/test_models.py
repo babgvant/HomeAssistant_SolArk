@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import unittest
 
@@ -135,6 +136,19 @@ class PlantPVSanityTests(unittest.TestCase):
 
 
 class SiteCoverageTests(unittest.TestCase):
+    def test_complete_upload_alignment_and_absolute_freshness_are_distinct(self):
+        now = datetime(2026, 10, 20, 19, 14, 11, tzinfo=timezone.utc)
+        for age, fresh in ((0, True), (360, True), (361, False), (-1, False)):
+            timestamp = (now - timedelta(seconds=age)).isoformat()
+            summaries = [{"pac": power, "updateAt": timestamp} for power in (2934, 4189, 4776)]
+            realtime = {"pac": 11899, "updateAt": timestamp}
+            result = models.site_flow_coverage({"pvPower": 11899}, realtime, summaries, now)
+            self.assertEqual(result["status"], "complete")
+            self.assertEqual(result["source_fresh"], fresh)
+            self.assertEqual(result["source_age_seconds"], age)
+        realtime["updateAt"] = (now - timedelta(seconds=90)).isoformat()
+        self.assertEqual(models.site_flow_coverage({"pvPower": 11899}, realtime, summaries)["status"], "unverified")
+
     def test_staggered_subtotal_and_complete_recovery(self):
         summaries = [{"pac": 4000, "updateAt": "2026-10-06T17:06:54Z"},
                      {"pac": 5000, "updateAt": "2026-10-06T17:02:00Z"},

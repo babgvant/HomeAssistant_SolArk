@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 from typing import Any
-from datetime import datetime
+from datetime import datetime, timedelta
 from math import isfinite
+
+# Captures show five-minute cloud uploads; allow one minute for upload skew.
+SITE_FLOW_MAX_SOURCE_AGE = timedelta(minutes=6)
 
 INVERTER_PARAMETER_IDS = (16,17,18,19,20,21,23,24,25,26,27,28,29,30,31,34,35,44,45,46,60,67,68,70,71,73,75,76,77,78,79,80,81,82,83,84,85,86,91,92,93,94,96,97,98,101,102,103,104,209,210,465,466,467,596,597,598,599,600,601,602,603,604,607,608,609,610,611)
 
@@ -170,10 +173,10 @@ def plant_pv_sanity(
         "power_balance_error": power_balance["error"],
         "tolerance_watts": tolerance,
     })
-    if abs(power_balance["error"]) > tolerance:
-        return {**result, "reason": "power_balance_mismatch"}
     if numeric["pv_power"] + tolerance < partial_inverter_power:
         return {**result, "reason": "below_known_inverter_power"}
+    if abs(power_balance["error"]) > tolerance:
+        return {**result, "reason": "power_balance_mismatch"}
     return {**result, "accepted": True, "reason": "balanced_plant_flow"}
 
 
@@ -192,7 +195,10 @@ def merge_inverter_topology(
     return list(by_serial.values())
 
 
-def site_flow_coverage(flow: dict[str, Any], realtime: dict[str, Any], summaries: list[dict[str, Any]]) -> dict[str, Any]:
+def site_flow_coverage(
+    flow: dict[str, Any], realtime: dict[str, Any], summaries: list[dict[str, Any]],
+    now: datetime | None = None,
+) -> dict[str, Any]:
     """Detect the observed staggered-upload subtotal, without using AC power as PV.
 
     Compare like-for-like summary/realtime pac values. Only apply the result to
@@ -230,10 +236,15 @@ def site_flow_coverage(flow: dict[str, Any], realtime: dict[str, Any], summaries
     recent_total = sum(power for power, current in zip(powers, recent) if current)
     result = {"inverter_power_sum": total, "recent_inverter_power_sum": recent_total,
               "recent_inverter_count": sum(recent), "expected_inverter_count": len(summaries)}
-    if all(recent) and abs(pac - total) <= tolerance:
-        return {**result, "status": "complete", "reason": "matching_complete_upload"}
+    if now is not None:
+        ages = [(now - timestamp).total_seconds() for timestamp in [plant_time, *times]]
+        result.update(source_age_seconds=max(ages), source_fresh=all(
+            0 <= age <= SITE_FLOW_MAX_SOURCE_AGE.total_seconds() for age in ages
+        ))
     if abs((plant_time - newest).total_seconds()) > 60:
         return {**result, **unknown}
+    if all(recent) and abs(pac - total) <= tolerance:
+        return {**result, "status": "complete", "reason": "matching_complete_upload"}
     if not all(recent) and total - recent_total >= 500 and abs(pac - recent_total) <= tolerance:
         return {**result, "status": "partial", "reason": "staggered_upload_subtotal"}
     return {**result, **unknown}

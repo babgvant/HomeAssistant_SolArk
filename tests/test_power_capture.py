@@ -15,6 +15,25 @@ def sample(pv=10000, battery=-5000):
 
 
 class CaptureTests(unittest.TestCase):
+    def test_quality_evidence_is_isolated_without_age_change_events(self):
+        capture = module.PowerCapture({"diagnostic_capture": True})
+        data = sample()
+        aggregation = data["aggregation"]["pv_power"]
+        aggregation.update(quality="balanced", sample_age_seconds=0,
+                           site_flow_coverage={"source_age_seconds": 0},
+                           plant_flow_sanity={"accepted": True})
+        capture.record(data, {})
+        aggregation["site_flow_coverage"]["source_age_seconds"] = 30
+        aggregation["sample_age_seconds"] = 30
+        capture.record(data, {})
+        self.assertEqual(capture.total_events, 0)
+        self.assertEqual(capture.ring[0]["aggregation"]["site_flow_coverage"]["source_age_seconds"], 0)
+        aggregation["quality"] = "power_balance_mismatch"
+        aggregation["plant_flow_sanity"]["accepted"] = False
+        capture.record(data, {})
+        self.assertIn("source_or_topology_change", capture.events[0]["triggers"][0]["reasons"])
+        self.assertTrue(capture.ring[0]["aggregation"]["plant_flow_sanity"]["accepted"])
+
     def test_raw_plant_dip_is_captured_while_selected_pv_is_cached(self):
         capture = module.PowerCapture({"diagnostic_capture": True})
         data = sample()

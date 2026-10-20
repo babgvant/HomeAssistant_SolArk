@@ -76,6 +76,22 @@ Rejected plant samples retain the last accepted plant PV for at most two minutes
 then become unavailable. A complete inverter sum remains preferred. These entities expose
 `contributing_inverters`, `expected_inverters`, and `aggregation_method` attributes.
 PV power also exposes `plant_flow_sanity` and fallback `sample_age_seconds`.
+When only the balance check fails, fresh complete upload evidence can corroborate
+the reported plant PV. This uses `coverage_corroborated_plant_flow` with
+`quality: power_balance_mismatch`; `plant_flow_sanity` still reports rejection,
+the error and tolerance. The `site_flow_coverage` attribute reports the evidence
+and source age. Plant realtime and every known inverter summary must agree with
+plant PV within the coverage rounding allowance, with timestamps aligned within
+60 seconds and no source older than six minutes (five-minute uploads plus skew)
+or in the future. AC `pac` is only corroboration; it is never substituted for PV.
+Invalid inputs, known inverter lower bounds, and auxiliary-flow exclusions still
+apply. Imbalanced samples do not refresh either validated hold cache.
+
+This keeps downstream solar-surplus calculations available during corroborated
+balance mismatches. The reported PV and other flow measurements may still be
+inconsistent, so charging automations requiring balanced telemetry should check
+`quality` / `plant_flow_sanity` before using the calculated surplus.
+
 This check catches inconsistent snapshots, but cannot detect a consistently partial
 cloud snapshot. PV power in watts can legitimately decrease; only accumulated
 energy in kWh is expected to rise during a day before its daily reset.

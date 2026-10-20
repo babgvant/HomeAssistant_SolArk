@@ -30,7 +30,10 @@ class PowerCapture:
         sample = {
             "utc": datetime.now(timezone.utc).isoformat(),
             "powers": {k: data.get("plant", {}).get("values", {}).get(k) for k in POWER_KEYS},
-            "aggregation": {k: aggregation.get(k) for k in ("aggregation_method", "expected_inverters")},
+            "aggregation": {k: deepcopy(aggregation.get(k)) for k in (
+                "aggregation_method", "expected_inverters", "quality", "sample_age_seconds",
+                "plant_flow_sanity", "site_flow_coverage",
+            )},
             "contributing_count": len(aggregation.get("contributing_inverters", [])),
             "endpoint_errors": dict(data.get("endpoint_errors", {})),
             "endpoint_timing": deepcopy(timings),
@@ -51,7 +54,8 @@ class PowerCapture:
             reasons.append("incomplete_inverter_total")
         if self.ring:
             previous = self.ring[-1]
-            if (previous["aggregation"] != sample["aggregation"]
+            if (any(previous["aggregation"].get(key) != sample["aggregation"].get(key)
+                    for key in ("aggregation_method", "expected_inverters", "quality"))
                     or previous["contributing_count"] != sample["contributing_count"]):
                 reasons.append("source_or_topology_change")
             for key in POWER_KEYS:
